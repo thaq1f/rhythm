@@ -22,17 +22,19 @@ struct SessionSpriteView: View {
         }
         .buttonStyle(.plain)
         .onAppear {
-            startBobAnimation()
+            startBobAnimationIfNeeded()
         }
         .onChange(of: state) {
             bobOffset = 0
-            startBobAnimation()
+            startBobAnimationIfNeeded()
         }
     }
 
-    private func startBobAnimation() {
+    private func startBobAnimationIfNeeded() {
+        let amplitude = isSelected ? state.bobAmplitude : state.bobAmplitude * 0.67
+        guard amplitude > 0 else { return }
         withAnimation(.easeInOut(duration: state.bobDuration).repeatForever(autoreverses: true)) {
-            bobOffset = isSelected ? 3 : 2
+            bobOffset = amplitude
         }
     }
 }

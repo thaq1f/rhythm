@@ -1,3 +1,5 @@
+import Foundation
+
 enum NotchiTask: String, CaseIterable {
     case idle, working, sleeping, compacting, waiting
 
@@ -21,6 +23,15 @@ enum NotchiTask: String, CaseIterable {
         case .idle, .waiting: return 1.5
         case .working:    return 0.4
         case .compacting: return 0.5
+        }
+    }
+
+    var bobAmplitude: CGFloat {
+        switch self {
+        case .sleeping:       return 0
+        case .idle, .waiting: return 1.5
+        case .compacting:     return 0.75
+        case .working:        return 0.5
         }
     }
 
@@ -86,6 +97,7 @@ struct NotchiState: Equatable {
     var spriteSheetName: String { "\(task.spritePrefix)_\(emotion.rawValue)" }
     var animationFPS: Double { task.animationFPS }
     var bobDuration: Double { task.bobDuration }
+    var bobAmplitude: CGFloat { task.bobAmplitude }
     var swayAmplitude: Double { emotion.swayAmplitude }
     var canWalk: Bool { task.canWalk }
     var displayName: String { task.displayName }

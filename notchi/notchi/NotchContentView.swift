@@ -217,7 +217,7 @@ struct NotchContentView: View {
                 .frame(width: notchSize.width - cornerRadiusInsets.closed.top)
 
             headerSprites
-                .offset(x: 15, y: -5)
+                .offset(x: 15, y: -2)
                 .frame(width: sideWidth)
         }
     }
