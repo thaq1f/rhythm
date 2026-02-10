@@ -158,7 +158,7 @@ struct NotchContentView: View {
                         backButton
                             .padding(.leading, 15)
                     } else {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             PanelHeaderButton(
                                 sfSymbol: panelManager.isPinned ? "pin.fill" : "pin",
                                 action: { panelManager.togglePin() }
@@ -168,12 +168,12 @@ struct NotchContentView: View {
                                 action: toggleMute
                             )
                         }
-                        .padding(.leading, 15)
+                        .padding(.leading, 12)
                     }
                     Spacer()
                     headerButtons
                 }
-                .padding(.top, 8)
+                .padding(.top, 4)
                 .padding(.horizontal, 8)
                 .frame(width: NotchConstants.expandedPanelSize.width - 48)
             }
@@ -181,11 +181,11 @@ struct NotchContentView: View {
     }
 
     private var headerButtons: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             PanelHeaderButton(sfSymbol: "gearshape", action: { showingPanelSettings = true })
             PanelHeaderButton(sfSymbol: "xmark", action: { panelManager.collapse() })
         }
-        .padding(.trailing, 3)
+        .padding(.trailing, 8)
     }
 
     private var backButton: some View {

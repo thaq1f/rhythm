@@ -179,7 +179,7 @@ struct ExpandedPanelView: View {
                     .padding(.bottom, 10)
 
                     ScrollViewReader { proxy in
-                        ScrollView {
+                        ScrollView(showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
                                 if let prompt = effectiveSession?.lastUserPrompt {
                                     UserPromptBubbleView(text: prompt)

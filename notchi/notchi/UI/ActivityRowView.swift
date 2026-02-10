@@ -23,7 +23,7 @@ struct ActivityRowView: View {
                     .padding(.leading, 16)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
     }
 
     private var bullet: some View {
