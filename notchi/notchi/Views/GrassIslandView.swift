@@ -152,22 +152,22 @@ private struct GrassSpriteView: View {
     var glowOpacity: Double = 0
 
     private let swayDuration: Double = 2.0
-    private var bobAmplitude: CGFloat { state.bobAmplitude == 0 ? 0 : 2 }
+    private var bobAmplitude: CGFloat {
+        guard state.bobAmplitude > 0 else { return 0 }
+        return state.task == .working ? 1.5 : 1
+    }
     private let glowColor = Color(red: 0.4, green: 0.7, blue: 1.0)
 
     private var swayAmplitude: Double {
-        state.task == .sleeping ? 0 : state.swayAmplitude
+        (state.task == .sleeping || state.task == .compacting) ? 0 : state.swayAmplitude
     }
 
     private var isAnimatingMotion: Bool {
         bobAmplitude > 0 || swayAmplitude > 0
     }
 
-    private func bobOffset(at date: Date) -> CGFloat {
-        guard bobAmplitude > 0 else { return 0 }
-        let t = date.timeIntervalSinceReferenceDate
-        let phase = (t / state.bobDuration).truncatingRemainder(dividingBy: 1.0)
-        return sin(phase * .pi * 2) * bobAmplitude
+    private var bobDuration: Double {
+        state.task == .working ? 1.0 : state.bobDuration
     }
 
     private func swayDegrees(at date: Date) -> Double {
@@ -199,7 +199,7 @@ private struct GrassSpriteView: View {
             .rotationEffect(.degrees(swayDegrees(at: timeline.date)), anchor: .bottom)
             .offset(
                 x: SpriteLayout.xOffset(xPosition: xPosition, totalWidth: totalWidth),
-                y: yOffset + bobOffset(at: timeline.date)
+                y: yOffset + bobOffset(at: timeline.date, duration: bobDuration, amplitude: bobAmplitude)
             )
         }
     }

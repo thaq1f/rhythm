@@ -29,10 +29,9 @@ enum NotchiTask: String, CaseIterable {
 
     var bobAmplitude: CGFloat {
         switch self {
-        case .sleeping:       return 0
-        case .idle, .waiting: return 1.5
-        case .compacting:     return 0.75
-        case .working:        return 0.5
+        case .sleeping, .compacting: return 0
+        case .idle, .waiting:        return 1.5
+        case .working:               return 0.5
         }
     }
 
@@ -84,9 +83,9 @@ enum NotchiEmotion: String, CaseIterable {
 
     var swayAmplitude: Double {
         switch self {
-        case .neutral: return 1.0
-        case .happy:   return 2.0
-        case .sad:     return 0.5
+        case .neutral: return 0.5
+        case .happy:   return 1.0
+        case .sad:     return 0.25
         }
     }
 }
