@@ -6,6 +6,7 @@ struct PanelSettingsView: View {
     @State private var hooksInstalled = HookInstaller.isInstalled()
     @State private var hooksError = false
     @State private var apiKeyInput = AppSettings.anthropicApiKey ?? ""
+    @ObservedObject private var updateManager = UpdateManager.shared
     private var usageConnected: Bool { ClaudeUsageService.shared.isConnected }
     private var hasApiKey: Bool { !apiKeyInput.isEmpty }
 
@@ -127,9 +128,12 @@ struct PanelSettingsView: View {
 
     private var actionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SettingsRowView(icon: "arrow.triangle.2.circlepath", title: "Check for Updates") {
-                versionText
+            Button(action: { updateManager.checkForUpdates() }) {
+                SettingsRowView(icon: "arrow.triangle.2.circlepath", title: "Check for Updates") {
+                    updateStatusView
+                }
             }
+            .buttonStyle(.plain)
 
             Button(action: openGitHubRepo) {
                 SettingsRowView(icon: "star", title: "Star on GitHub") {
@@ -206,10 +210,57 @@ struct PanelSettingsView: View {
             .cornerRadius(4)
     }
 
-    private var versionText: some View {
-        Text("v1.0.0")
-            .font(.system(size: 10))
-            .foregroundColor(TerminalColors.dimmedText)
+    @ViewBuilder
+    private var updateStatusView: some View {
+        switch updateManager.state {
+        case .checking:
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Checking...")
+                    .font(.system(size: 10))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        case .upToDate:
+            statusBadge("Up to date", color: TerminalColors.green)
+        case .found(let version, _):
+            statusBadge("v\(version) available", color: TerminalColors.amber)
+        case .downloading(let progress):
+            HStack(spacing: 4) {
+                ProgressView(value: progress)
+                    .frame(width: 40)
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 10))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        case .extracting:
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Installing...")
+                    .font(.system(size: 10))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        case .readyToInstall(let version):
+            Button(action: { updateManager.downloadAndInstall() }) {
+                statusBadge("Install v\(version)", color: TerminalColors.green)
+            }
+            .buttonStyle(.plain)
+        case .installing:
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Installing...")
+                    .font(.system(size: 10))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        case .error(let message):
+            statusBadge(message, color: TerminalColors.red)
+        case .idle:
+            Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")")
+                .font(.system(size: 10))
+                .foregroundColor(TerminalColors.dimmedText)
+        }
     }
 }
 

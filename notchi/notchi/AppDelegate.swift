@@ -1,9 +1,32 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchPanel: NotchPanel?
     private let windowHeight: CGFloat = 500
+
+    private let updater: SPUUpdater
+    private let userDriver: NotchUserDriver
+
+    override init() {
+        userDriver = NotchUserDriver()
+        updater = SPUUpdater(
+            hostBundle: Bundle.main,
+            applicationBundle: Bundle.main,
+            userDriver: userDriver,
+            delegate: nil
+        )
+        super.init()
+
+        UpdateManager.shared.setUpdater(updater)
+
+        do {
+            try updater.start()
+        } catch {
+            print("Failed to start Sparkle updater: \(error)")
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
