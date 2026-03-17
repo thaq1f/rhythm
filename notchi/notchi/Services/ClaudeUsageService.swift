@@ -61,7 +61,8 @@ final class ClaudeUsageService {
                 AppSettings.isUsageEnabled = false
                 return
             }
-            await fetchAndStartPolling(with: accessToken)
+            cachedToken = accessToken
+            await performFetch(with: accessToken, userInitiated: true)
         }
     }
 
@@ -76,11 +77,13 @@ final class ClaudeUsageService {
                 return
             }
             AppSettings.isUsageEnabled = true
-            await fetchAndStartPolling(with: accessToken)
+            cachedToken = accessToken
+            await performFetch(with: accessToken)
         }
     }
 
     func retryNow() {
+        guard !isLoading else { return }
         error = nil
         stopPolling()
         Task {
@@ -89,18 +92,13 @@ final class ClaudeUsageService {
                 return
             }
             consecutiveRateLimits = 0
-            await performFetch(with: accessToken)
+            await performFetch(with: accessToken, userInitiated: true)
         }
     }
 
     func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
-    }
-
-    private func fetchAndStartPolling(with accessToken: String) async {
-        cachedToken = accessToken
-        await performFetch(with: accessToken)
     }
 
     private func schedulePollTimer(interval: TimeInterval? = nil) {
@@ -126,12 +124,13 @@ final class ClaudeUsageService {
         await performFetch(with: accessToken)
     }
 
-    private func performFetch(with accessToken: String) async {
-        isLoading = true
+    private func performFetch(with accessToken: String, userInitiated: Bool = false) async {
+        if userInitiated { isLoading = true }
 
-        defer { isLoading = false }
+        defer { if userInitiated { isLoading = false } }
 
         var request = URLRequest(url: Self.usageURL)
+        request.timeoutInterval = 30
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -157,6 +156,8 @@ final class ClaudeUsageService {
                     }
                     if currentUsage == nil {
                         error = "Rate limited, retrying in \(Int(backoffDelay))s"
+                    } else {
+                        error = nil
                     }
                     logger.warning("Rate limited (429), backing off \(Int(backoffDelay))s (attempt \(self.consecutiveRateLimits))")
                     schedulePollTimer(interval: backoffDelay)
@@ -170,8 +171,9 @@ final class ClaudeUsageService {
                     if let freshToken = KeychainManager.refreshAccessTokenSilently(),
                        freshToken != accessToken {
                         consecutiveRateLimits = 0
+                        cachedToken = freshToken
                         logger.info("Token refreshed silently from Claude Code keychain")
-                        await fetchAndStartPolling(with: freshToken)
+                        await performFetch(with: freshToken)
                         return
                     }
 
