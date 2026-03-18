@@ -129,8 +129,9 @@ final class ClaudeUsageService {
     var recoveryAction: ClaudeUsageRecoveryAction = .none
 
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let authFailureStatusCodes: Set<Int> = [401, 403]
+    private static let messagesURL = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let maxBackoffInterval: TimeInterval = 600
+    private static let oauthRecheckInterval = 10
 
     private let dependencies: ClaudeUsageServiceDependencies
     private var resolvedUserAgent: String?
@@ -139,6 +140,8 @@ final class ClaudeUsageService {
     private var consecutiveRateLimits = 0
     private var lastRateLimitTime: Date?
     private var cachedToken: String?
+    private var preferHeadersFallback = false
+    private var oauthRecheckCounter = 0
 
     init() {
         self.dependencies = .live
@@ -151,6 +154,8 @@ final class ClaudeUsageService {
     func connectAndStartPolling() {
         AppSettings.isUsageEnabled = true
         clearTransientState()
+        preferHeadersFallback = false
+        oauthRecheckCounter = 0
         stopPolling()
 
         Task {
@@ -229,6 +234,12 @@ final class ClaudeUsageService {
         await performFetch(with: accessToken)
     }
 
+    private enum FetchResult {
+        case success
+        case handled
+        case enterprise403
+    }
+
     // Internal for unit tests that verify service state transitions directly.
     func performFetch(with accessToken: String, userInitiated: Bool = false) async {
         if userInitiated { isLoading = true }
@@ -241,6 +252,25 @@ final class ClaudeUsageService {
             return
         }
 
+        if preferHeadersFallback {
+            oauthRecheckCounter += 1
+            if oauthRecheckCounter < Self.oauthRecheckInterval {
+                await fetchViaHeaders(with: accessToken, userAgent: userAgent, userInitiated: userInitiated)
+                return
+            }
+            oauthRecheckCounter = 0
+        }
+
+        let result = await fetchViaOAuth(with: accessToken, userAgent: userAgent, userInitiated: userInitiated)
+
+        if case .enterprise403 = result {
+            preferHeadersFallback = true
+            oauthRecheckCounter = 0
+            await fetchViaHeaders(with: accessToken, userAgent: userAgent, userInitiated: userInitiated)
+        }
+    }
+
+    private func fetchViaOAuth(with accessToken: String, userAgent: String, userInitiated: Bool) async -> FetchResult {
         var request = URLRequest(url: Self.usageURL)
         request.timeoutInterval = 30
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -248,7 +278,7 @@ final class ClaudeUsageService {
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
-        logger.info("Fetching usage — User-Agent: \(userAgent)")
+        logger.info("Fetching usage via OAuth — User-Agent: \(userAgent)")
 
         do {
             let (data, response) = try await dependencies.fetchUsage(request)
@@ -259,12 +289,12 @@ final class ClaudeUsageService {
                     staleMessage: "Stale response, retrying in \(Int(pollInterval))s"
                 )
                 schedulePollTimer()
-                return
+                return .handled
             }
 
             guard httpResponse.statusCode == 200 else {
                 let headers = httpResponse.allHeaderFields.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
-                logger.warning("HTTP \(httpResponse.statusCode) — headers: \(headers)")
+                logger.warning("OAuth HTTP \(httpResponse.statusCode) — headers: \(headers)")
 
                 if httpResponse.statusCode == 429 {
                     let body = String(data: data, encoding: .utf8) ?? "<unreadable>"
@@ -272,7 +302,6 @@ final class ClaudeUsageService {
                     lastRateLimitTime = dependencies.now()
                     consecutiveRateLimits += 1
 
-                    // After 3 consecutive 429s, try refreshing the token for a fresh rate limit window
                     if consecutiveRateLimits >= 3,
                        let freshToken = dependencies.refreshAccessTokenSilently(),
                        freshToken != accessToken {
@@ -280,7 +309,7 @@ final class ClaudeUsageService {
                         consecutiveRateLimits = 0
                         logger.info("Token refreshed after persistent 429s")
                         await performFetch(with: freshToken, userInitiated: userInitiated)
-                        return
+                        return .handled
                     }
 
                     let exponentialDelay = pollInterval * pow(2.0, Double(consecutiveRateLimits))
@@ -296,52 +325,161 @@ final class ClaudeUsageService {
                     )
                     logger.warning("Rate limited (429), backing off \(Int(backoffDelay))s (attempt \(self.consecutiveRateLimits))")
                     schedulePollTimer(interval: backoffDelay)
-                    return
+                    return .handled
                 }
 
-                if Self.authFailureStatusCodes.contains(httpResponse.statusCode) {
-                    cachedToken = nil
-                    dependencies.clearCachedOAuthToken()
-
-                    if let freshToken = dependencies.refreshAccessTokenSilently(),
-                       freshToken != accessToken {
-                        consecutiveRateLimits = 0
-                        cachedToken = freshToken
-                        logger.info("Token refreshed silently from Claude Code keychain")
-                        await performFetch(with: freshToken, userInitiated: userInitiated)
-                        return
-                    }
-
-                    presentReconnectRequired("Token expired")
-                    stopPolling()
-                } else {
-                    presentRetryableIssue(
-                        noUsageMessage: "HTTP \(httpResponse.statusCode), retrying in \(Int(pollInterval))s",
-                        staleMessage: "Stale (HTTP \(httpResponse.statusCode)), retrying in \(Int(pollInterval))s"
-                    )
-                    schedulePollTimer()
+                if httpResponse.statusCode == 403 {
+                    logger.info("OAuth returned 403 — enterprise account, trying headers fallback")
+                    return .enterprise403
                 }
+
+                if httpResponse.statusCode == 401 {
+                    await handleAuthFailure(currentToken: accessToken, userInitiated: userInitiated)
+                    return .handled
+                }
+
+                presentRetryableIssue(
+                    noUsageMessage: "HTTP \(httpResponse.statusCode), retrying in \(Int(pollInterval))s",
+                    staleMessage: "Stale (HTTP \(httpResponse.statusCode)), retrying in \(Int(pollInterval))s"
+                )
+                schedulePollTimer()
                 logger.warning("API error: HTTP \(httpResponse.statusCode)")
-                return
+                return .handled
             }
 
             let usageResponse = try JSONDecoder().decode(UsageResponse.self, from: data)
             consecutiveRateLimits = 0
             lastRateLimitTime = nil
             isConnected = true
+            preferHeadersFallback = false
             clearTransientState()
             currentUsage = usageResponse.fiveHour
-            logger.info("Usage fetched: \(self.currentUsage?.usagePercentage ?? 0)%")
+            logger.info("Usage fetched via OAuth: \(self.currentUsage?.usagePercentage ?? 0)%")
             schedulePollTimer()
+            return .success
 
         } catch {
             presentRetryableIssue(
                 noUsageMessage: "Network error, retrying in \(Int(pollInterval))s",
                 staleMessage: "Stale network data, retrying in \(Int(pollInterval))s"
             )
-            logger.error("Fetch failed: \(error.localizedDescription)")
+            logger.error("OAuth fetch failed: \(error.localizedDescription)")
             schedulePollTimer()
+            return .handled
         }
+    }
+
+    @discardableResult
+    private func fetchViaHeaders(with accessToken: String, userAgent: String, userInitiated: Bool) async -> FetchResult {
+        var request = URLRequest(url: Self.messagesURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+
+        let body: [String: Any] = [
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "x"]],
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        logger.info("Fetching usage via headers fallback")
+
+        do {
+            let (_, response) = try await dependencies.fetchUsage(request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                presentRetryableIssue(
+                    noUsageMessage: "Invalid response, retrying in \(Int(pollInterval))s",
+                    staleMessage: "Stale response, retrying in \(Int(pollInterval))s"
+                )
+                schedulePollTimer()
+                return .handled
+            }
+
+            if httpResponse.statusCode == 401 {
+                await handleAuthFailure(currentToken: accessToken, userInitiated: userInitiated)
+                return .handled
+            }
+
+            guard let utilization = parseHeaderUtilization(from: httpResponse) else {
+                logger.debug("No unified rate limit headers in response")
+                presentRetryableIssue(
+                    noUsageMessage: "No rate limit headers, retrying in \(Int(pollInterval))s",
+                    staleMessage: "Stale, retrying in \(Int(pollInterval))s"
+                )
+                schedulePollTimer()
+                return .handled
+            }
+
+            let resetDate = parseHeaderResetDate(from: httpResponse)
+            let usage = QuotaPeriod(utilization: (utilization * 100).rounded(), resetDate: resetDate)
+            consecutiveRateLimits = 0
+            lastRateLimitTime = nil
+            isConnected = true
+            clearTransientState()
+            currentUsage = usage
+            logger.info("Usage fetched via headers: \(usage.usagePercentage)%")
+            schedulePollTimer()
+            return .success
+
+        } catch {
+            presentRetryableIssue(
+                noUsageMessage: "Network error, retrying in \(Int(pollInterval))s",
+                staleMessage: "Stale network data, retrying in \(Int(pollInterval))s"
+            )
+            logger.error("Headers fetch failed: \(error.localizedDescription)")
+            schedulePollTimer()
+            return .handled
+        }
+    }
+
+    private func handleAuthFailure(currentToken: String, userInitiated: Bool) async {
+        cachedToken = nil
+        preferHeadersFallback = false
+        oauthRecheckCounter = 0
+        dependencies.clearCachedOAuthToken()
+
+        if let freshToken = dependencies.refreshAccessTokenSilently(),
+           freshToken != currentToken {
+            consecutiveRateLimits = 0
+            cachedToken = freshToken
+            logger.info("Token refreshed silently from Claude Code keychain")
+            await performFetch(with: freshToken, userInitiated: userInitiated)
+            return
+        }
+
+        presentReconnectRequired("Token expired")
+        stopPolling()
+    }
+
+    private func parseHeaderUtilization(from response: HTTPURLResponse) -> Double? {
+        guard let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-unified-5h-utilization") else {
+            return nil
+        }
+        return Double(value.trimmingCharacters(in: .whitespaces))
+    }
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoBasic = ISO8601DateFormatter()
+
+    private func parseHeaderResetDate(from response: HTTPURLResponse) -> Date? {
+        guard let value = response.value(forHTTPHeaderField: "anthropic-ratelimit-unified-5h-reset"),
+              !value.isEmpty else {
+            return nil
+        }
+        if let epoch = TimeInterval(value) {
+            return Date(timeIntervalSince1970: epoch)
+        }
+        return Self.isoFractional.date(from: value) ?? Self.isoBasic.date(from: value)
     }
 
     private func resolveUserAgent() -> String? {

@@ -14,21 +14,25 @@ struct QuotaPeriod: Decodable {
     let utilization: Double
     let resetsAt: String?
 
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoBasic = ISO8601DateFormatter()
+
     enum CodingKeys: String, CodingKey {
         case utilization
         case resetsAt = "resets_at"
     }
 
     var usagePercentage: Int {
-        // API returns utilization as percentage (0-100), not decimal (0-1)
         Int(utilization.rounded())
     }
 
     var resetDate: Date? {
         guard let resetsAt else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: resetsAt) ?? ISO8601DateFormatter().date(from: resetsAt)
+        return Self.isoFractional.date(from: resetsAt) ?? Self.isoBasic.date(from: resetsAt)
     }
 
     var isExpired: Bool {
@@ -50,5 +54,12 @@ struct QuotaPeriod: Decodable {
         } else {
             return "\(minutes)m"
         }
+    }
+}
+
+extension QuotaPeriod {
+    init(utilization: Double, resetDate: Date?) {
+        self.utilization = utilization
+        self.resetsAt = resetDate.map { Self.isoFractional.string(from: $0) }
     }
 }

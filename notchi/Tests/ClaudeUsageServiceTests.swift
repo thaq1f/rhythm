@@ -363,13 +363,364 @@ final class ClaudeUsageServiceTests: XCTestCase {
         return Data(json.utf8)
     }
 
+    // MARK: - Enterprise Headers Fallback
+
+    func testOAuth403TriggersHeadersFallbackAndSucceeds() async throws {
+        let scheduler = PollSchedulerSpy()
+        var requestURLs: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                requestURLs.append(path)
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.42",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage", "/v1/messages"])
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
+        XCTAssertTrue(service.isConnected)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.statusMessage)
+        XCTAssertEqual(service.recoveryAction, .none)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testOAuth403ThenHeadersFallbackFailsWithNoHeaders() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeResponse(statusCode: 200, url: self.messagesURL))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertNil(service.currentUsage)
+        XCTAssertEqual(service.error, "No rate limit headers, retrying in 60s")
+        XCTAssertEqual(service.recoveryAction, .retry)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testOAuth403ThenHeaders401ClearsToken() async throws {
+        let scheduler = PollSchedulerSpy()
+        var clearCalls = 0
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            clearCachedOAuthToken: { clearCalls += 1 },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeResponse(statusCode: 401, url: self.messagesURL))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(clearCalls, 1)
+        XCTAssertEqual(service.error, "Token expired")
+        XCTAssertEqual(service.recoveryAction, .reconnect)
+        XCTAssertFalse(service.isConnected)
+    }
+
+    func testCachedFallbackSkipsOAuth() async throws {
+        let scheduler = PollSchedulerSpy()
+        var requestURLs: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                requestURLs.append(path)
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.50",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+        requestURLs.removeAll()
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(requestURLs, ["/v1/messages"])
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 50)
+    }
+
+    func testOAuthRecheckAfterTenPolls() async throws {
+        let scheduler = PollSchedulerSpy()
+        var requestURLs: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                requestURLs.append(path)
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.30",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        // First call: OAuth 403 → headers fallback
+        await service.performFetch(with: "token")
+        requestURLs.removeAll()
+
+        // Polls 2-10: headers only (9 polls, counter goes 1-9)
+        for _ in 0..<9 {
+            await service.performFetch(with: "token")
+        }
+        let headerOnlyURLs = requestURLs
+        requestURLs.removeAll()
+
+        // Poll 11: counter hits 10, rechecks OAuth
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(headerOnlyURLs, Array(repeating: "/v1/messages", count: 9))
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage", "/v1/messages"])
+    }
+
+    func testOAuthRecheckSucceedsAfterAccountUpgrade() async throws {
+        let scheduler = PollSchedulerSpy()
+        var oauthCallCount = 0
+        var requestURLs: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                requestURLs.append(path)
+                if path == "/api/oauth/usage" {
+                    oauthCallCount += 1
+                    if oauthCallCount == 1 {
+                        return (Data(), self.makeResponse(statusCode: 403))
+                    }
+                    return (self.makeSuccessPayload(utilization: 25), self.makeResponse(statusCode: 200))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.30",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        // First call: OAuth 403 → headers fallback
+        await service.performFetch(with: "token")
+
+        // 9 more polls (headers only)
+        for _ in 0..<9 {
+            await service.performFetch(with: "token")
+        }
+
+        // Poll 11: recheck OAuth → now succeeds (account upgraded)
+        requestURLs.removeAll()
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage"])
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 25)
+
+        // Next poll should go to OAuth directly (preferHeadersFallback cleared)
+        requestURLs.removeAll()
+        await service.performFetch(with: "token")
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage"])
+    }
+
+    func testHeadersUtilizationScaling() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.75",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 75)
+    }
+
+    func testOAuth401StillClearsToken() async throws {
+        let scheduler = PollSchedulerSpy()
+        var clearCalls = 0
+        var authHeaders: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            refreshAccessTokenSilently: { "new-token" },
+            clearCachedOAuthToken: { clearCalls += 1 },
+            fetchUsage: { request in
+                let authHeader = request.value(forHTTPHeaderField: "Authorization") ?? "<missing>"
+                authHeaders.append(authHeader)
+                if authHeader == "Bearer old-token" {
+                    return (Data(), self.makeResponse(statusCode: 401))
+                }
+                return (self.makeSuccessPayload(utilization: 33), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "old-token")
+
+        XCTAssertEqual(clearCalls, 1)
+        XCTAssertEqual(authHeaders, ["Bearer old-token", "Bearer new-token"])
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 33)
+    }
+
+    func testOAuth403ThenHeadersNetworkErrorShowsFallbackError() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                throw URLError(.notConnectedToInternet)
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.error, "Network error, retrying in 60s")
+        XCTAssertEqual(service.recoveryAction, .retry)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testMissingResetHeaderHandledGracefully() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(utilization: "0.60", reset: nil))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 60)
+        XCTAssertNil(service.currentUsage?.resetDate)
+        XCTAssertTrue(service.isConnected)
+    }
+
+    func testHeaders429WithNoRateLimitHeadersShowsRetryableError() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeResponse(statusCode: 429, url: self.messagesURL))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertNil(service.currentUsage)
+        XCTAssertEqual(service.error, "No rate limit headers, retrying in 60s")
+        XCTAssertEqual(service.recoveryAction, .retry)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testMalformedUtilizationHeaderTreatedAsMissing() async throws {
+        let scheduler = PollSchedulerSpy()
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(utilization: "not-a-number", reset: nil))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertNil(service.currentUsage)
+        XCTAssertEqual(service.error, "No rate limit headers, retrying in 60s")
+        XCTAssertEqual(service.recoveryAction, .retry)
+    }
+
+    // MARK: - Helpers
+
+    private var messagesURL: URL { URL(string: "https://api.anthropic.com/v1/messages")! }
+
     private func makeQuotaPeriod(utilization: Double) -> QuotaPeriod {
         QuotaPeriod(utilization: utilization, resetsAt: "2099-01-01T01:00:00Z")
     }
 
-    private func makeResponse(statusCode: Int, headers: [String: String] = [:]) -> HTTPURLResponse {
+    private func makeResponse(statusCode: Int, headers: [String: String] = [:], url: URL? = nil) -> HTTPURLResponse {
         HTTPURLResponse(
-            url: URL(string: "https://api.anthropic.com/api/oauth/usage")!,
+            url: url ?? URL(string: "https://api.anthropic.com/api/oauth/usage")!,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: headers
+        )!
+    }
+
+    private func makeHeadersResponse(utilization: String, reset: String?, statusCode: Int = 200) -> HTTPURLResponse {
+        var headers: [String: String] = [
+            "anthropic-ratelimit-unified-5h-utilization": utilization,
+        ]
+        if let reset {
+            headers["anthropic-ratelimit-unified-5h-reset"] = reset
+        }
+        return HTTPURLResponse(
+            url: URL(string: "https://api.anthropic.com/v1/messages")!,
             statusCode: statusCode,
             httpVersion: nil,
             headerFields: headers
