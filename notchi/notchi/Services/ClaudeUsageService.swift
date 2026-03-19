@@ -9,6 +9,14 @@ enum ClaudeUsageRecoveryAction: Equatable {
     case reconnect
 }
 
+struct ClaudeUsageRecoverySnapshot: Codable, Equatable {
+    let oauthBackoffUntil: Date?
+    let oauthHeadersFallbackProbeUntil: Date?
+    let isHeadersFallbackActive: Bool
+    let didSucceedWithHeadersFallbackInOAuthBackoff: Bool
+    let lastGoodUsage: QuotaPeriod?
+}
+
 protocol ClaudeUsagePollTimer {
     func invalidate()
 }
@@ -21,6 +29,9 @@ struct ClaudeUsageServiceDependencies {
     var cacheOAuthToken: (_ token: String) -> Void
     var refreshAccessTokenSilently: () -> String?
     var clearCachedOAuthToken: () -> Void
+    var loadRecoverySnapshot: () -> ClaudeUsageRecoverySnapshot?
+    var saveRecoverySnapshot: (ClaudeUsageRecoverySnapshot) -> Void
+    var clearRecoverySnapshot: () -> Void
     var resolveUserAgent: () -> String?
     var pollJitter: () -> Double
     var now: () -> Date
@@ -105,6 +116,15 @@ extension ClaudeUsageServiceDependencies {
         },
         clearCachedOAuthToken: {
             KeychainManager.clearCachedOAuthToken()
+        },
+        loadRecoverySnapshot: {
+            AppSettings.claudeUsageRecoverySnapshot
+        },
+        saveRecoverySnapshot: { snapshot in
+            AppSettings.claudeUsageRecoverySnapshot = snapshot
+        },
+        clearRecoverySnapshot: {
+            AppSettings.claudeUsageRecoverySnapshot = nil
         },
         resolveUserAgent: {
             ClaudeCLIResolver.resolveUserAgent()
@@ -207,12 +227,15 @@ final class ClaudeUsageService {
                 logger.info("No cached token, user must connect manually")
                 isConnected = false
                 AppSettings.isUsageEnabled = false
+                clearOAuthBackoffState()
                 clearTransientState()
                 return
             }
 
             AppSettings.isUsageEnabled = true
             cachedToken = accessToken
+
+            restoreRecoverySnapshotIfNeeded()
 
             if isHeadersFallbackActive {
                 if let remainingProbe = activeHeadersFallbackProbeRemaining() {
@@ -654,6 +677,7 @@ final class ClaudeUsageService {
             if activeFallbackRefresh {
                 didSucceedWithHeadersFallbackInOAuthBackoff = true
                 clearTransientState()
+                persistRecoverySnapshotIfNeeded()
                 logger.info("Usage refreshed via active headers fallback: \(usage.usagePercentage)%")
                 scheduleHeadersFallbackActiveTimer()
                 return .success
@@ -973,6 +997,7 @@ final class ClaudeUsageService {
         oauthBackoffUntil = newBackoffUntil
         didAttemptHeadersFallbackInOAuthBackoff = false
         didSucceedWithHeadersFallbackInOAuthBackoff = false
+        persistRecoverySnapshotIfNeeded()
     }
 
     private func clearOAuthBackoffState() {
@@ -981,6 +1006,7 @@ final class ClaudeUsageService {
         isHeadersFallbackActive = false
         didAttemptHeadersFallbackInOAuthBackoff = false
         didSucceedWithHeadersFallbackInOAuthBackoff = false
+        dependencies.clearRecoverySnapshot()
     }
 
     private func beginHeadersFallbackProbeWindow() {
@@ -990,6 +1016,7 @@ final class ClaudeUsageService {
         oauthHeadersFallbackProbeUntil = dependencies.now().addingTimeInterval(Self.headersFallbackOAuthProbeInterval)
         didAttemptHeadersFallbackInOAuthBackoff = false
         didSucceedWithHeadersFallbackInOAuthBackoff = true
+        persistRecoverySnapshotIfNeeded()
     }
 
     private func scheduleBackoffTimer(remaining: TimeInterval) {
@@ -1069,8 +1096,71 @@ final class ClaudeUsageService {
 
         didSucceedWithHeadersFallbackInOAuthBackoff = true
         clearTransientState()
+        persistRecoverySnapshotIfNeeded()
         scheduleHeadersFallbackActiveTimer()
         return .handled
+    }
+
+    private func restoreRecoverySnapshotIfNeeded() {
+        guard let snapshot = dependencies.loadRecoverySnapshot() else {
+            return
+        }
+
+        let now = dependencies.now()
+        let hasActiveHeadersFallback = snapshot.isHeadersFallbackActive
+            && snapshot.oauthHeadersFallbackProbeUntil.map({ $0 > now }) ?? false
+        let hasActiveOAuthBackoff = snapshot.oauthBackoffUntil.map({ $0 > now }) ?? false
+
+        guard hasActiveHeadersFallback || hasActiveOAuthBackoff else {
+            dependencies.clearRecoverySnapshot()
+            return
+        }
+
+        currentUsage = isUsageStillValid(snapshot.lastGoodUsage, now: now) ? snapshot.lastGoodUsage : nil
+        oauthBackoffUntil = hasActiveOAuthBackoff ? snapshot.oauthBackoffUntil : nil
+        oauthHeadersFallbackProbeUntil = hasActiveHeadersFallback ? snapshot.oauthHeadersFallbackProbeUntil : nil
+        isHeadersFallbackActive = hasActiveHeadersFallback
+        didSucceedWithHeadersFallbackInOAuthBackoff = snapshot.didSucceedWithHeadersFallbackInOAuthBackoff
+        didAttemptHeadersFallbackInOAuthBackoff = false
+
+        if hasActiveHeadersFallback, currentUsage != nil {
+            isConnected = true
+            clearTransientState()
+            logger.info("Restored active headers fallback recovery state from persistence")
+        } else if hasActiveOAuthBackoff {
+            logger.info("Restored OAuth backoff recovery state from persistence")
+        }
+    }
+
+    private func persistRecoverySnapshotIfNeeded() {
+        guard let snapshot = makeRecoverySnapshot() else {
+            dependencies.clearRecoverySnapshot()
+            return
+        }
+        dependencies.saveRecoverySnapshot(snapshot)
+    }
+
+    private func makeRecoverySnapshot() -> ClaudeUsageRecoverySnapshot? {
+        guard oauthBackoffUntil != nil
+            || (isHeadersFallbackActive && oauthHeadersFallbackProbeUntil != nil) else {
+            return nil
+        }
+
+        let usageToPersist = isUsageStillValid(currentUsage, now: dependencies.now()) ? currentUsage : nil
+        return ClaudeUsageRecoverySnapshot(
+            oauthBackoffUntil: oauthBackoffUntil,
+            oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
+            isHeadersFallbackActive: isHeadersFallbackActive,
+            didSucceedWithHeadersFallbackInOAuthBackoff: didSucceedWithHeadersFallbackInOAuthBackoff,
+            lastGoodUsage: usageToPersist
+        )
+    }
+
+    private func isUsageStillValid(_ usage: QuotaPeriod?, now: Date) -> Bool {
+        guard let usage, let resetDate = usage.resetDate else {
+            return false
+        }
+        return resetDate > now
     }
 
     private func presentRetryableIssue(noUsageMessage: String, staleMessage: String) {

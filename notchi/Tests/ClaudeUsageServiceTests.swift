@@ -26,6 +26,7 @@ private final class PollSchedulerSpy {
 final class ClaudeUsageServiceTests: XCTestCase {
     override func tearDown() {
         AppSettings.isUsageEnabled = false
+        AppSettings.claudeUsageRecoverySnapshot = nil
         super.tearDown()
     }
 
@@ -93,6 +94,171 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertFalse(service.isUsageStale)
         XCTAssertEqual(service.recoveryAction, .none)
         XCTAssertEqual(scheduler.intervals, [60, 60])
+    }
+
+    func testStartPollingRestoresPersistedActiveHeadersFallbackState() async throws {
+        let scheduler = PollSchedulerSpy()
+        let now = Date(timeIntervalSince1970: 100)
+        var fetchCalled = false
+        let snapshot = makeRecoverySnapshot(
+            oauthHeadersFallbackProbeUntil: now.addingTimeInterval(600),
+            isHeadersFallbackActive: true,
+            didSucceedWithHeadersFallbackInOAuthBackoff: true,
+            lastGoodUsage: makeQuotaPeriod(utilization: 46)
+        )
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            getCachedOAuthToken: { "token" },
+            loadRecoverySnapshot: { snapshot },
+            now: { now },
+            fetchUsage: { _ in
+                fetchCalled = true
+                return (self.makeSuccessPayload(utilization: 20), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        service.startPolling()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertFalse(fetchCalled)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 46)
+        XCTAssertNil(service.error)
+        XCTAssertNil(service.statusMessage)
+        XCTAssertFalse(service.isUsageStale)
+        XCTAssertEqual(service.recoveryAction, .none)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testStartPollingRestoresPersistedOAuthBackoffState() async throws {
+        let scheduler = PollSchedulerSpy()
+        let now = Date(timeIntervalSince1970: 100)
+        var fetchCalled = false
+        let snapshot = makeRecoverySnapshot(
+            oauthBackoffUntil: now.addingTimeInterval(120),
+            lastGoodUsage: makeQuotaPeriod(utilization: 52)
+        )
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            getCachedOAuthToken: { "token" },
+            loadRecoverySnapshot: { snapshot },
+            now: { now },
+            fetchUsage: { _ in
+                fetchCalled = true
+                return (self.makeSuccessPayload(utilization: 20), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        service.startPolling()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertFalse(fetchCalled)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 52)
+        XCTAssertNil(service.error)
+        XCTAssertEqual(service.statusMessage, "Stale, retrying in 120s")
+        XCTAssertTrue(service.isUsageStale)
+        XCTAssertEqual(service.recoveryAction, .retry)
+        XCTAssertEqual(scheduler.intervals, [120])
+    }
+
+    func testExpiredPersistedRecoveryStateIsClearedAndLiveFetchRuns() async throws {
+        let scheduler = PollSchedulerSpy()
+        let now = Date(timeIntervalSince1970: 100)
+        var clearCalls = 0
+        var requestURLs: [String] = []
+        let snapshot = makeRecoverySnapshot(
+            oauthBackoffUntil: now.addingTimeInterval(-5),
+            lastGoodUsage: makeQuotaPeriod(utilization: 40)
+        )
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            getCachedOAuthToken: { "token" },
+            loadRecoverySnapshot: { snapshot },
+            clearRecoverySnapshot: { clearCalls += 1 },
+            now: { now },
+            fetchUsage: { request in
+                requestURLs.append(request.url?.path ?? "")
+                return (self.makeSuccessPayload(utilization: 33), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        service.startPolling()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(clearCalls, 2)
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage"])
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 33)
+        XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testSuccessfulOAuthAfterRestoredBackoffClearsPersistedRecoveryState() async throws {
+        let scheduler = PollSchedulerSpy()
+        var now = Date(timeIntervalSince1970: 100)
+        var storedSnapshot: ClaudeUsageRecoverySnapshot? = makeRecoverySnapshot(
+            oauthBackoffUntil: now.addingTimeInterval(5),
+            lastGoodUsage: makeQuotaPeriod(utilization: 41)
+        )
+        var requestURLs: [String] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            getCachedOAuthToken: { "token" },
+            loadRecoverySnapshot: { storedSnapshot },
+            saveRecoverySnapshot: { storedSnapshot = $0 },
+            clearRecoverySnapshot: { storedSnapshot = nil },
+            now: { now },
+            fetchUsage: { request in
+                requestURLs.append(request.url?.path ?? "")
+                return (self.makeSuccessPayload(utilization: 35), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        service.startPolling()
+        await Task.yield()
+        await Task.yield()
+        XCTAssertNotNil(storedSnapshot)
+        XCTAssertTrue(requestURLs.isEmpty)
+
+        now = now.addingTimeInterval(6)
+        scheduler.fireLast()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(requestURLs, ["/api/oauth/usage"])
+        XCTAssertNil(storedSnapshot)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 35)
+        XCTAssertEqual(scheduler.intervals, [60, 60])
+    }
+
+    func testConnectAndStartPollingClearsPersistedRecoveryState() async throws {
+        let scheduler = PollSchedulerSpy()
+        var clearCalls = 0
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            getAccessToken: { "token" },
+            clearRecoverySnapshot: { clearCalls += 1 },
+            fetchUsage: { _ in
+                (self.makeSuccessPayload(utilization: 27), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        service.connectAndStartPolling()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertEqual(clearCalls, 2)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 27)
     }
 
     func testRateLimitWithoutCachedUsageShowsRetryState() async throws {
@@ -1077,6 +1243,9 @@ final class ClaudeUsageServiceTests: XCTestCase {
         cacheOAuthToken: @escaping (_ token: String) -> Void = { _ in },
         refreshAccessTokenSilently: @escaping () -> String? = { nil },
         clearCachedOAuthToken: @escaping () -> Void = {},
+        loadRecoverySnapshot: @escaping () -> ClaudeUsageRecoverySnapshot? = { nil },
+        saveRecoverySnapshot: @escaping (ClaudeUsageRecoverySnapshot) -> Void = { _ in },
+        clearRecoverySnapshot: @escaping () -> Void = {},
         now: @escaping () -> Date = { Date() },
         fetchUsage: @escaping (URLRequest) async throws -> (Data, URLResponse)
     ) -> ClaudeUsageServiceDependencies {
@@ -1088,6 +1257,9 @@ final class ClaudeUsageServiceTests: XCTestCase {
             cacheOAuthToken: cacheOAuthToken,
             refreshAccessTokenSilently: refreshAccessTokenSilently,
             clearCachedOAuthToken: clearCachedOAuthToken,
+            loadRecoverySnapshot: loadRecoverySnapshot,
+            saveRecoverySnapshot: saveRecoverySnapshot,
+            clearRecoverySnapshot: clearRecoverySnapshot,
             resolveUserAgent: resolveUserAgent,
             pollJitter: { 0 },
             now: now,
@@ -1197,6 +1369,32 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertNil(service.statusMessage)
         XCTAssertEqual(service.recoveryAction, .none)
         XCTAssertEqual(scheduler.intervals, [60])
+    }
+
+    func testOAuth403HeadersFallbackDoesNotPersist429RecoveryState() async throws {
+        let scheduler = PollSchedulerSpy()
+        var savedSnapshots: [ClaudeUsageRecoverySnapshot] = []
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: { "claude-code/2.1.77" },
+            saveRecoverySnapshot: { savedSnapshots.append($0) },
+            fetchUsage: { request in
+                let path = request.url?.path ?? ""
+                if path == "/api/oauth/usage" {
+                    return (Data(), self.makeResponse(statusCode: 403))
+                }
+                return (Data(), self.makeHeadersResponse(
+                    utilization: "0.42",
+                    reset: "2099-01-01T01:00:00Z"
+                ))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+
+        XCTAssertTrue(savedSnapshots.isEmpty)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
     }
 
     func testOAuth403WithAmbiguousJSONStillFallsBackToHeaders() async throws {
@@ -1693,6 +1891,22 @@ final class ClaudeUsageServiceTests: XCTestCase {
 
     private func makeQuotaPeriod(utilization: Double) -> QuotaPeriod {
         QuotaPeriod(utilization: utilization, resetsAt: "2099-01-01T01:00:00Z")
+    }
+
+    private func makeRecoverySnapshot(
+        oauthBackoffUntil: Date? = nil,
+        oauthHeadersFallbackProbeUntil: Date? = nil,
+        isHeadersFallbackActive: Bool = false,
+        didSucceedWithHeadersFallbackInOAuthBackoff: Bool = false,
+        lastGoodUsage: QuotaPeriod? = nil
+    ) -> ClaudeUsageRecoverySnapshot {
+        ClaudeUsageRecoverySnapshot(
+            oauthBackoffUntil: oauthBackoffUntil,
+            oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
+            isHeadersFallbackActive: isHeadersFallbackActive,
+            didSucceedWithHeadersFallbackInOAuthBackoff: didSucceedWithHeadersFallbackInOAuthBackoff,
+            lastGoodUsage: lastGoodUsage
+        )
     }
 
     private func makeResponse(statusCode: Int, headers: [String: String] = [:], url: URL? = nil) -> HTTPURLResponse {

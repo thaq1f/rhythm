@@ -10,7 +10,7 @@ struct UsageResponse: Decodable {
     }
 }
 
-struct QuotaPeriod: Decodable {
+struct QuotaPeriod: Codable, Equatable {
     let utilization: Double
     let resetsAt: String?
 
