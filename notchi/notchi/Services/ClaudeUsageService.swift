@@ -13,8 +13,16 @@ struct ClaudeUsageRecoverySnapshot: Codable, Equatable {
     let oauthBackoffUntil: Date?
     let oauthHeadersFallbackProbeUntil: Date?
     let isHeadersFallbackActive: Bool
-    let didSucceedWithHeadersFallbackInOAuthBackoff: Bool
+    let hasUsableHeadersFallbackInOAuthBackoff: Bool
     let lastGoodUsage: QuotaPeriod?
+
+    private enum CodingKeys: String, CodingKey {
+        case oauthBackoffUntil
+        case oauthHeadersFallbackProbeUntil
+        case isHeadersFallbackActive
+        case hasUsableHeadersFallbackInOAuthBackoff = "didSucceedWithHeadersFallbackInOAuthBackoff"
+        case lastGoodUsage
+    }
 }
 
 protocol ClaudeUsagePollTimer {
@@ -175,7 +183,7 @@ final class ClaudeUsageService {
     private var oauthHeadersFallbackProbeUntil: Date?
     private var isHeadersFallbackActive = false
     private var didAttemptHeadersFallbackInOAuthBackoff = false
-    private var didSucceedWithHeadersFallbackInOAuthBackoff = false
+    private var hasUsableHeadersFallbackInOAuthBackoff = false
 
     init() {
         self.dependencies = .live
@@ -195,7 +203,7 @@ final class ClaudeUsageService {
 
         Task {
             guard let accessToken = dependencies.getAccessToken() else {
-                presentReconnectRequired("Keychain access required")
+                presentReconnectRequired(noUsageMessage: "Keychain access required")
                 AppSettings.isUsageEnabled = false
                 return
             }
@@ -259,7 +267,7 @@ final class ClaudeUsageService {
     func retryNow() {
         guard !isLoading else { return }
         if isHeadersFallbackActive {
-            logger.info("Headers fallback is active, keeping current usage and waiting for the next refresh or OAuth probe")
+            logger.info("Retry tapped during active headers refresh mode")
             if let remainingProbe = activeHeadersFallbackProbeRemaining() {
                 scheduleHeadersFallbackActiveTimer(remainingProbe: remainingProbe)
             } else {
@@ -274,7 +282,7 @@ final class ClaudeUsageService {
             return
         }
         if let remainingBackoff = activeOAuthBackoffRemaining() {
-            logger.info("OAuth backoff active, honoring retry cooldown window")
+            logger.info("Retry tapped during active OAuth backoff")
             Task {
                 guard let accessToken = cachedToken else {
                     connectAndStartPolling()
@@ -326,17 +334,17 @@ final class ClaudeUsageService {
 
         if isHeadersFallbackActive {
             if let remainingProbe = activeHeadersFallbackProbeRemaining() {
-                logger.info("Refreshing usage via active headers fallback while OAuth probe is \(Int(remainingProbe))s away")
+                logger.info("Refreshing usage via headers while OAuth re-probe is \(Int(remainingProbe))s away")
                 await refreshActiveHeadersFallback(with: accessToken)
             } else {
-                logger.info("Headers fallback OAuth probe due, retrying OAuth")
+                logger.info("Headers refresh window reached OAuth re-probe deadline")
                 await performFetch(with: accessToken)
             }
             return
         }
 
         if let remainingBackoff = activeOAuthBackoffRemaining() {
-            logger.info("Skipping OAuth fetch while active backoff remains for \(Int(remainingBackoff))s")
+            logger.info("Skipping OAuth fetch while \(Int(remainingBackoff))s of backoff remain")
             presentOAuthBackoffState(remaining: remainingBackoff)
             scheduleBackoffTimer(remaining: remainingBackoff)
             return
@@ -390,7 +398,7 @@ final class ClaudeUsageService {
         defer { if userInitiated { isLoading = false } }
 
         guard let userAgent = resolveUserAgent() else {
-            presentReconnectRequired("Claude CLI not found")
+            presentReconnectRequired(noUsageMessage: "Claude CLI not found")
             stopPolling()
             return
         }
@@ -448,7 +456,7 @@ final class ClaudeUsageService {
                 if allow403EmptyHeadersRecovery {
                     await recoverFromEmptyHeadersFallback(afterOAuth403With: effectiveAccessToken, userInitiated: userInitiated)
                 } else {
-                    presentReconnectRequired("Claude authentication needs attention. Reconnect Claude Code.")
+                    presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
                     stopPolling()
                 }
             }
@@ -521,7 +529,7 @@ final class ClaudeUsageService {
                         )
                         if case .success = fallbackResult {
                             logger.info(
-                                "OAuth 429 switched to headers refreshes every \(Int(Self.headersFallbackRefreshInterval))s with OAuth re-probe in \(Int(Self.headersFallbackOAuthProbeInterval))s"
+                                "OAuth 429 entered headers refresh mode: refresh every \(Int(Self.headersFallbackRefreshInterval))s, OAuth probe in \(Int(Self.headersFallbackOAuthProbeInterval))s"
                             )
                             return .handled
                         }
@@ -667,16 +675,16 @@ final class ClaudeUsageService {
             currentUsage = usage
 
             if activeFallbackRefresh {
-                didSucceedWithHeadersFallbackInOAuthBackoff = true
+                hasUsableHeadersFallbackInOAuthBackoff = true
                 clearTransientState()
                 persistRecoverySnapshotIfNeeded()
-                logger.info("Usage refreshed via active headers fallback: \(usage.usagePercentage)%")
+                logger.info("Usage refreshed via active headers mode: \(usage.usagePercentage)%")
                 scheduleHeadersFallbackActiveTimer()
                 return .success
             }
 
             if oauthBackoffDelay != nil {
-                didSucceedWithHeadersFallbackInOAuthBackoff = true
+                hasUsableHeadersFallbackInOAuthBackoff = true
                 clearTransientState()
                 beginHeadersFallbackProbeWindow()
                 logger.info("Usage fetched via headers during OAuth backoff: \(usage.usagePercentage)%")
@@ -711,7 +719,7 @@ final class ClaudeUsageService {
 
     private func refreshActiveHeadersFallback(with accessToken: String) async {
         guard let userAgent = resolveUserAgent() else {
-            presentReconnectRequired("Claude CLI not found")
+            presentReconnectRequired(noUsageMessage: "Claude CLI not found")
             stopPolling()
             return
         }
@@ -752,7 +760,7 @@ final class ClaudeUsageService {
             return
         }
 
-        presentReconnectRequired("Token expired")
+        presentReconnectRequired(noUsageMessage: "Token expired")
         stopPolling()
     }
 
@@ -787,7 +795,7 @@ final class ClaudeUsageService {
         if usesCredentialMetadata,
            !credentials.scopes.isEmpty,
            !credentials.scopes.contains("user:profile") {
-            presentReconnectRequired("Claude OAuth permissions missing. Reconnect Claude Code.")
+            presentReconnectRequired(noUsageMessage: "Claude OAuth permissions missing. Reconnect Claude Code.")
             stopPolling()
             return .handled
         }
@@ -812,7 +820,7 @@ final class ClaudeUsageService {
                 return .handled
             }
 
-            presentReconnectRequired("Token expired")
+            presentReconnectRequired(noUsageMessage: "Token expired")
             stopPolling()
             return .handled
         }
@@ -838,7 +846,7 @@ final class ClaudeUsageService {
             return
         }
 
-        presentReconnectRequired("Claude authentication needs attention. Reconnect Claude Code.")
+        presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
         stopPolling()
     }
 
@@ -852,7 +860,7 @@ final class ClaudeUsageService {
             logger.warning(
                 "OAuth 403 requires reconnect - errorType: \(errorTypeLog, privacy: .public), requestID: \(requestIDLog, privacy: .public), message: \(rawMessage, privacy: .public)"
             )
-            presentReconnectRequired("Claude OAuth permissions missing. Reconnect Claude Code.")
+            presentReconnectRequired(noUsageMessage: "Claude OAuth permissions missing. Reconnect Claude Code.")
             stopPolling()
             return .handled
 
@@ -978,7 +986,7 @@ final class ClaudeUsageService {
         let newBackoffUntil = now.addingTimeInterval(delay)
         isHeadersFallbackActive = false
         oauthHeadersFallbackProbeUntil = nil
-        didSucceedWithHeadersFallbackInOAuthBackoff = false
+        hasUsableHeadersFallbackInOAuthBackoff = false
 
         if let currentBackoffUntil = oauthBackoffUntil,
            currentBackoffUntil > now {
@@ -988,7 +996,6 @@ final class ClaudeUsageService {
 
         oauthBackoffUntil = newBackoffUntil
         didAttemptHeadersFallbackInOAuthBackoff = false
-        didSucceedWithHeadersFallbackInOAuthBackoff = false
         persistRecoverySnapshotIfNeeded()
     }
 
@@ -997,7 +1004,7 @@ final class ClaudeUsageService {
         oauthHeadersFallbackProbeUntil = nil
         isHeadersFallbackActive = false
         didAttemptHeadersFallbackInOAuthBackoff = false
-        didSucceedWithHeadersFallbackInOAuthBackoff = false
+        hasUsableHeadersFallbackInOAuthBackoff = false
         dependencies.clearRecoverySnapshot()
     }
 
@@ -1007,7 +1014,7 @@ final class ClaudeUsageService {
         isHeadersFallbackActive = true
         oauthHeadersFallbackProbeUntil = dependencies.now().addingTimeInterval(Self.headersFallbackOAuthProbeInterval)
         didAttemptHeadersFallbackInOAuthBackoff = false
-        didSucceedWithHeadersFallbackInOAuthBackoff = true
+        hasUsableHeadersFallbackInOAuthBackoff = true
         persistRecoverySnapshotIfNeeded()
     }
 
@@ -1046,7 +1053,7 @@ final class ClaudeUsageService {
     private func handleRetryDuringOAuthBackoff(with accessToken: String, remaining: TimeInterval) async {
         if !didAttemptHeadersFallbackInOAuthBackoff {
             guard let userAgent = resolveUserAgent() else {
-                presentReconnectRequired("Claude CLI not found")
+                presentReconnectRequired(noUsageMessage: "Claude CLI not found")
                 stopPolling()
                 return
             }
@@ -1081,7 +1088,7 @@ final class ClaudeUsageService {
             return .handled
         }
 
-        didSucceedWithHeadersFallbackInOAuthBackoff = true
+        hasUsableHeadersFallbackInOAuthBackoff = true
         clearTransientState()
         persistRecoverySnapshotIfNeeded()
         scheduleHeadersFallbackActiveTimer()
@@ -1107,15 +1114,15 @@ final class ClaudeUsageService {
         oauthBackoffUntil = hasActiveOAuthBackoff ? snapshot.oauthBackoffUntil : nil
         oauthHeadersFallbackProbeUntil = hasActiveHeadersFallback ? snapshot.oauthHeadersFallbackProbeUntil : nil
         isHeadersFallbackActive = hasActiveHeadersFallback
-        didSucceedWithHeadersFallbackInOAuthBackoff = snapshot.didSucceedWithHeadersFallbackInOAuthBackoff
+        hasUsableHeadersFallbackInOAuthBackoff = snapshot.hasUsableHeadersFallbackInOAuthBackoff
         didAttemptHeadersFallbackInOAuthBackoff = false
 
         if hasActiveHeadersFallback, currentUsage != nil {
             isConnected = true
             clearTransientState()
-            logger.info("Restored active headers fallback recovery state from persistence")
+            logger.info("Restored active headers refresh mode from persistence")
         } else if hasActiveOAuthBackoff {
-            logger.info("Restored OAuth recovery timing from persistence")
+            logger.info("Restored OAuth recovery window from persistence")
         }
     }
 
@@ -1138,7 +1145,7 @@ final class ClaudeUsageService {
             oauthBackoffUntil: oauthBackoffUntil,
             oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
             isHeadersFallbackActive: isHeadersFallbackActive,
-            didSucceedWithHeadersFallbackInOAuthBackoff: didSucceedWithHeadersFallbackInOAuthBackoff,
+            hasUsableHeadersFallbackInOAuthBackoff: hasUsableHeadersFallbackInOAuthBackoff,
             lastGoodUsage: usageToPersist
         )
     }
@@ -1163,11 +1170,11 @@ final class ClaudeUsageService {
         }
     }
 
-    private func presentReconnectRequired(_ message: String) {
+    private func presentReconnectRequired(noUsageMessage: String) {
         recoveryAction = .reconnect
         isConnected = false
         if currentUsage == nil {
-            error = message
+            error = noUsageMessage
             statusMessage = nil
             isUsageStale = false
         } else {

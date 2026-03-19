@@ -128,7 +128,7 @@ final class ClaudeUsageServiceTests: XCTestCase {
         let snapshot = makeRecoverySnapshot(
             oauthHeadersFallbackProbeUntil: now.addingTimeInterval(600),
             isHeadersFallbackActive: true,
-            didSucceedWithHeadersFallbackInOAuthBackoff: true,
+            hasUsableHeadersFallbackInOAuthBackoff: true,
             lastGoodUsage: makeQuotaPeriod(utilization: 46)
         )
         let dependencies = makeDependencies(
@@ -1849,14 +1849,14 @@ final class ClaudeUsageServiceTests: XCTestCase {
         oauthBackoffUntil: Date? = nil,
         oauthHeadersFallbackProbeUntil: Date? = nil,
         isHeadersFallbackActive: Bool = false,
-        didSucceedWithHeadersFallbackInOAuthBackoff: Bool = false,
+        hasUsableHeadersFallbackInOAuthBackoff: Bool = false,
         lastGoodUsage: QuotaPeriod? = nil
     ) -> ClaudeUsageRecoverySnapshot {
         ClaudeUsageRecoverySnapshot(
             oauthBackoffUntil: oauthBackoffUntil,
             oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
             isHeadersFallbackActive: isHeadersFallbackActive,
-            didSucceedWithHeadersFallbackInOAuthBackoff: didSucceedWithHeadersFallbackInOAuthBackoff,
+            hasUsableHeadersFallbackInOAuthBackoff: hasUsableHeadersFallbackInOAuthBackoff,
             lastGoodUsage: lastGoodUsage
         )
     }
