@@ -227,7 +227,7 @@ final class ClaudeUsageService {
 
         Task {
             guard let resolution = resolveStoredAccessToken(allowsCredentialRecovery: true) else {
-                presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
+                presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
                 AppSettings.isUsageEnabled = false
                 return
             }
@@ -262,7 +262,7 @@ final class ClaudeUsageService {
                 AppSettings.isUsageEnabled = false
                 clearOAuthBackoffState()
                 if currentUsage != nil {
-                    presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
+                    presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
                 } else {
                     clearTransientState()
                 }
@@ -465,7 +465,7 @@ final class ClaudeUsageService {
         defer { if userInitiated { isLoading = false } }
 
         guard let userAgent = resolveUserAgent() else {
-            presentReconnectRequired(noUsageMessage: "Claude CLI not found")
+            presentReconnectRequired(message: "Install Claude Code CLI to continue")
             stopPolling()
             return
         }
@@ -565,7 +565,7 @@ final class ClaudeUsageService {
             if allow403EmptyHeadersRecovery {
                 await recoverFromEmptyHeadersFallback(afterOAuth403With: accessToken, userInitiated: userInitiated)
             } else {
-                presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
+                presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
                 stopPolling()
             }
         }
@@ -822,7 +822,7 @@ final class ClaudeUsageService {
 
     private func refreshActiveHeadersFallback(with accessToken: String) async {
         guard let userAgent = resolveUserAgent() else {
-            presentReconnectRequired(noUsageMessage: "Claude CLI not found")
+            presentReconnectRequired(message: "Install Claude Code CLI to continue")
             stopPolling()
             return
         }
@@ -846,7 +846,7 @@ final class ClaudeUsageService {
         oauthRecheckCounter = 0
         dependencies.clearCachedOAuthToken()
 
-        presentReconnectRequired(noUsageMessage: "Token expired")
+        presentReconnectRequired(message: "Token expired. Tap to reconnect.")
         stopPolling()
     }
 
@@ -887,7 +887,7 @@ final class ClaudeUsageService {
            !credentials.scopes.isEmpty,
            !credentials.scopes.contains("user:profile") {
             reconnectDiagnostic("preflightCredentials is forcing reconnect because Claude credential scopes are missing user:profile")
-            presentReconnectRequired(noUsageMessage: "Claude OAuth permissions missing. Reconnect Claude Code.")
+            presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
             stopPolling()
             return .handled
         }
@@ -914,7 +914,7 @@ final class ClaudeUsageService {
                 return .handled
             }
 
-            presentReconnectRequired(noUsageMessage: "Token expired")
+            presentReconnectRequired(message: "Start a Claude Code session to refresh credentials")
             stopPolling()
             return .handled
         }
@@ -941,7 +941,7 @@ final class ClaudeUsageService {
             return
         }
 
-        presentReconnectRequired(noUsageMessage: "Claude authentication needs attention. Reconnect Claude Code.")
+        presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
         stopPolling()
     }
 
@@ -955,7 +955,7 @@ final class ClaudeUsageService {
             logger.warning(
                 "OAuth 403 requires reconnect - errorType: \(errorTypeLog, privacy: .public), requestID: \(requestIDLog, privacy: .public), message: \(rawMessage, privacy: .public)"
             )
-            presentReconnectRequired(noUsageMessage: "Claude OAuth permissions missing. Reconnect Claude Code.")
+            presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
             stopPolling()
             return .handled
 
@@ -1150,7 +1150,7 @@ final class ClaudeUsageService {
     private func handleRetryDuringOAuthBackoff(with accessToken: String, remaining: TimeInterval) async {
         if !didAttemptHeadersFallbackInOAuthBackoff {
             guard let userAgent = resolveUserAgent() else {
-                presentReconnectRequired(noUsageMessage: "Claude CLI not found")
+                presentReconnectRequired(message: "Install Claude Code CLI to continue")
                 stopPolling()
                 return
             }
@@ -1269,19 +1269,19 @@ final class ClaudeUsageService {
         logger.info("[TEMP reconnect diagnostics] \(message, privacy: .public)")
     }
 
-    private func presentReconnectRequired(noUsageMessage: String) {
+    private func presentReconnectRequired(message: String) {
         reconnectDiagnostic(
-            "presentReconnectRequired: noUsageMessage=\(noUsageMessage), currentUsagePresent=\(currentUsage != nil), statusMessageWillBecomeTapHint=\(currentUsage != nil)"
+            "presentReconnectRequired: message=\(message), currentUsagePresent=\(currentUsage != nil)"
         )
         recoveryAction = .reconnect
         isConnected = false
         if currentUsage == nil {
-            error = noUsageMessage
+            error = message
             statusMessage = nil
             isUsageStale = false
         } else {
             error = nil
-            statusMessage = "Tap to reconnect Claude Code"
+            statusMessage = message
             isUsageStale = true
         }
     }
