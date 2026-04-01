@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>SUBundleName</key>
-	<string>Notchi</string>
+	<string>Rhythm</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUAutomaticallyUpdate</key>
@@ -13,7 +13,7 @@
 	<key>SUScheduledImpatientCheckInterval</key>
 	<integer>90000</integer>
 	<key>SUFeedURL</key>
-	<string>https://updates.notchi.app/appcast.xml</string>
+	<string>https://github.com/thaq1f/rhythm/releases/latest/download/appcast.xml</string>
 	<key>SURequireSignedFeed</key>
 	<true/>
 	<key>SUShowReleaseNotes</key>
@@ -22,5 +22,7 @@
 	<string>ZfouVFLXx9vyEimCHW+JWgAtikAq19KsWbig7FkB2QA=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Notchi uses the microphone for voice commands to interact with Claude Code sessions.</string>
 </dict>
 </plist>

@@ -25,6 +25,7 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
+        acceptsMouseMovedEvents = true
 
         // Hit testing is handled by NotchHitTestView (the content view wrapper)
         // which selectively passes through events based on notch/panel rect

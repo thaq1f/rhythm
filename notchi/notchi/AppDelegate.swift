@@ -33,11 +33,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        DiagLog.shared.write("APP: applicationDidFinishLaunching")
         setupNotchWindow()
         observeScreenChanges()
         observeWakeNotifications()
+        DiagLog.shared.write("APP: Starting hook services")
         startHookServices()
+        DiagLog.shared.write("APP: Restoring sessions")
+        SessionStore.shared.restoreSessions()
         startUsageService()
+        DiagLog.shared.write("APP: Starting voice services")
+        startVoiceServices()
+        DiagLog.shared.write("APP: Startup complete")
         startUpdater()
     }
 
@@ -129,6 +136,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
 
     @MainActor private func startUsageService() {
         ClaudeUsageService.shared.startPolling()
+    }
+
+    /// Start voice capture and key listener services
+    @MainActor private func startVoiceServices() {
+        VoiceOrchestrator.shared.start()
+        logger.info("Voice services started")
     }
 
     private func startUpdater() {

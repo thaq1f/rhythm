@@ -18,6 +18,8 @@ struct NotchContentView: View {
     var stateMachine: NotchiStateMachine = .shared
     var panelManager: NotchPanelManager = .shared
     var usageService: ClaudeUsageService = .shared
+    var agentSessionManager: AgentSessionManager = .shared
+    var voiceOrchestrator: VoiceOrchestrator = .shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var showingPanelSettings = false
     @State private var showingSessionActivity = false
@@ -29,8 +31,17 @@ struct NotchContentView: View {
         stateMachine.sessionStore
     }
 
+    private var voiceState: VoicePresentationState {
+        voiceOrchestrator.presentationState
+    }
+
     private var notchSize: CGSize { panelManager.notchSize }
     private var isExpanded: Bool { panelManager.isExpanded }
+
+    /// True when we have a locally spawned agent session
+    private var hasAgentSession: Bool {
+        agentSessionManager.activeProvider?.isRunning == true
+    }
 
     private var panelAnimation: Animation {
         isExpanded
@@ -50,7 +61,6 @@ struct NotchContentView: View {
         isExpanded ? cornerRadiusInsets.opened.bottom : cornerRadiusInsets.closed.bottom
     }
 
-    /// Uses the system notch curve in collapsed mode when available.
     private var notchClipShape: AnyShape {
         if !isExpanded, let systemPath = panelManager.systemNotchPath {
             return AnyShape(SystemNotchShape(cgPath: systemPath))
@@ -141,11 +151,14 @@ struct NotchContentView: View {
             }
         }
         .onChange(of: sessionStore.activeSessionCount) { _, count in
-            if count < 2 {
-                showingSessionActivity = false
-            }
+            if count < 2 { showingSessionActivity = false }
+        }
+        .onChange(of: voiceState.currentState) { _, newState in
+            panelManager.handleVoiceStateChange(newState)
         }
     }
+
+    // MARK: - Layout
 
     @ViewBuilder
     private var notchLayout: some View {
@@ -155,25 +168,19 @@ struct NotchContentView: View {
                     .frame(height: notchSize.height)
 
                 if isExpanded {
-                    ExpandedPanelView(
-                        sessionStore: sessionStore,
-                        usageService: usageService,
-                        showingSettings: $showingPanelSettings,
-                        showingSessionActivity: $showingSessionActivity,
-                        isActivityCollapsed: $isActivityCollapsed
-                    )
-                    .frame(
-                        width: NotchConstants.expandedPanelSize.width - 48,
-                        height: expandedPanelHeight
-                    )
-                    .transition(
-                        .asymmetric(
-                            insertion: .scale(scale: 0.8, anchor: .top)
-                                .combined(with: .opacity)
-                                .animation(.smooth(duration: 0.35)),
-                            removal: .opacity.animation(.easeOut(duration: 0.15))
+                    expandedContent
+                        .frame(
+                            width: NotchConstants.expandedPanelSize.width - 48,
+                            height: expandedPanelHeight
                         )
-                    )
+                        .transition(
+                            .asymmetric(
+                                insertion: .scale(scale: 0.8, anchor: .top)
+                                    .combined(with: .opacity)
+                                    .animation(.smooth(duration: 0.35)),
+                                removal: .opacity.animation(.easeOut(duration: 0.15))
+                            )
+                        )
                 }
             }
 
@@ -205,8 +212,61 @@ struct NotchContentView: View {
         }
     }
 
+    // MARK: - Header (collapsed)
+
+    @ViewBuilder
+    private var headerRow: some View {
+        HStack(spacing: 0) {
+            // Left: sprite
+            headerSprites
+                .offset(x: -15, y: -2)
+                .frame(width: sideWidth)
+                .opacity(isExpanded ? 0 : 1)
+                .animation(.none, value: isExpanded)
+
+            // Center: physical notch space
+            Color.clear
+                .frame(width: notchSize.width - cornerRadiusInsets.closed.top * 2)
+
+            // Right: voice compact indicator (recording/processing status)
+            VoiceCompactView(state: voiceState)
+                .frame(width: sideWidth)
+                .opacity(isExpanded ? 0 : 1)
+                .animation(.none, value: isExpanded)
+        }
+    }
+
+    @ViewBuilder
+    private var headerSprites: some View {
+        let topSession = sessionStore.sortedSessions.first
+        SessionSpriteView(
+            state: topSession?.state ?? .idle,
+            isSelected: true
+        )
+    }
+
+    // MARK: - Expanded Content (original Notchi layout + voice input)
+
+    @ViewBuilder
+    private var expandedContent: some View {
+        ExpandedPanelView(
+            sessionStore: sessionStore,
+            usageService: usageService,
+            showingSettings: $showingPanelSettings,
+            showingSessionActivity: $showingSessionActivity,
+            isActivityCollapsed: $isActivityCollapsed
+        )
+    }
+
+    // MARK: - Header Buttons
+
     private var headerButtons: some View {
         HStack(spacing: 8) {
+            // Mic button — tap to record voice
+            PanelHeaderButton(
+                sfSymbol: voiceState.currentState.isRecording ? "mic.fill" : "mic",
+                action: { voiceOrchestrator.toggleRecording() }
+            )
             PanelHeaderButton(
                 sfSymbol: "gearshape",
                 showsIndicator: updateManager.hasPendingUpdate,
@@ -237,29 +297,6 @@ struct NotchContentView: View {
             showingSessionActivity = false
             sessionStore.selectSession(nil)
         }
-    }
-
-    @ViewBuilder
-    private var headerRow: some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: notchSize.width - cornerRadiusInsets.closed.top)
-
-            headerSprites
-                .offset(x: 15, y: -2)
-                .frame(width: sideWidth)
-                .opacity(isExpanded ? 0 : 1)
-                .animation(.none, value: isExpanded)
-        }
-    }
-
-    @ViewBuilder
-    private var headerSprites: some View {
-        let topSession = sessionStore.sortedSessions.first
-        SessionSpriteView(
-            state: topSession?.state ?? .idle,
-            isSelected: true
-        )
     }
 
     private func toggleMute() {

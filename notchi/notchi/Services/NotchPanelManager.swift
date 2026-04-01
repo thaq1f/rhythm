@@ -1,4 +1,7 @@
 import AppKit
+import os.log
+
+private let panelLogger = Logger(subsystem: "com.ruban.notchi", category: "PanelManager")
 
 @MainActor
 @Observable
@@ -10,11 +13,12 @@ final class NotchPanelManager {
     private(set) var notchSize: CGSize = .zero
     private(set) var notchRect: CGRect = .zero
     private(set) var panelRect: CGRect = .zero
-    /// The exact notch shape from the system bezel path, or nil if unavailable
     private(set) var systemNotchPath: CGPath?
     private var screenHeight: CGFloat = 0
 
     private var mouseDownMonitor: EventMonitor?
+    private var hoverTimer: Timer?
+    private var collapseTimer: Timer?
 
     private init() {
         setupEventMonitors()
@@ -29,6 +33,7 @@ final class NotchPanelManager {
 
         let notchCenterX = screenFrame.origin.x + screenFrame.width / 2
         let sideWidth = max(0, newNotchSize.height - 12) + 24
+        // Match original Notchi: one side width
         let notchTotalWidth = newNotchSize.width + sideWidth
 
         notchRect = CGRect(
@@ -51,24 +56,24 @@ final class NotchPanelManager {
     }
 
     private func setupEventMonitors() {
+        // Click detection — works without Accessibility permission
         mouseDownMonitor = EventMonitor(mask: .leftMouseDown) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleMouseDown()
-            }
+            Task { @MainActor in self?.handleMouseDown() }
         }
         mouseDownMonitor?.start()
+
+        // Hover via NSTrackingArea is set up on the NotchHitTestView instead
+        // (doesn't require Accessibility permission)
     }
 
     private func handleMouseDown() {
         let location = NSEvent.mouseLocation
 
         if isExpanded {
-            // Check if click is outside the panel (unless pinned)
             if !isPinned && !panelRect.contains(location) {
                 collapse()
             }
         } else {
-            // Check if click is on the notch area
             if notchRect.contains(location) {
                 expand()
             }
@@ -87,14 +92,26 @@ final class NotchPanelManager {
     }
 
     func toggle() {
-        if isExpanded {
-            collapse()
-        } else {
-            expand()
-        }
+        isExpanded ? collapse() : expand()
     }
 
     func togglePin() {
         isPinned.toggle()
+    }
+
+    func handleVoiceStateChange(_ state: VoiceState) {
+        switch state {
+        case .recording:
+            // Don't auto-expand for recording — compact indicator in header is enough.
+            // But DO cancel any pending collapse so the panel stays stable.
+            break
+        case .agentThinking, .agentResponse:
+            expand()
+        case .idle, .success:
+            // Only auto-collapse if we auto-expanded for agent response
+            if !isPinned { /* let normal hover handle collapse */ }
+        default:
+            break
+        }
     }
 }

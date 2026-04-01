@@ -19,6 +19,7 @@ final class SessionData: Identifiable {
     let spriteXPosition: CGFloat
     let spriteYOffset: CGFloat
     let isInteractive: Bool
+    private(set) var pid: Int?
 
     private(set) var task: NotchiTask = .idle
     let emotionState = EmotionState()
@@ -138,6 +139,10 @@ final class SessionData: Identifiable {
         permissionMode = mode
     }
 
+    func updatePid(_ pid: Int?) {
+        if let pid { self.pid = pid }
+    }
+
     func setPendingQuestions(_ questions: [PendingQuestion]) {
         pendingQuestions = questions
         lastActivity = Date()
@@ -232,5 +237,45 @@ final class SessionData: Identifiable {
         let minutes = total / 60
         let seconds = total % 60
         formattedDuration = String(format: "%dm %02ds", minutes, seconds)
+    }
+
+    // MARK: - Persistence
+
+    struct Persisted: Codable {
+        let sessionId: String
+        let cwd: String
+        let sessionNumber: Int
+        let isInteractive: Bool
+        let lastActivity: Date
+        let lastUserPrompt: String?
+        let pid: Int?
+        let sessionStartTime: Date
+    }
+
+    func toPersisted() -> Persisted {
+        Persisted(
+            sessionId: id,
+            cwd: cwd,
+            sessionNumber: sessionNumber,
+            isInteractive: isInteractive,
+            lastActivity: lastActivity,
+            lastUserPrompt: lastUserPrompt,
+            pid: pid,
+            sessionStartTime: sessionStartTime
+        )
+    }
+
+    convenience init(restoring persisted: Persisted, existingXPositions: [CGFloat]) {
+        self.init(
+            sessionId: persisted.sessionId,
+            cwd: persisted.cwd,
+            sessionNumber: persisted.sessionNumber,
+            isInteractive: persisted.isInteractive,
+            existingXPositions: existingXPositions
+        )
+        self.pid = persisted.pid
+        self.lastUserPrompt = persisted.lastUserPrompt
+        self.lastActivity = persisted.lastActivity
+        self.task = .sleeping
     }
 }

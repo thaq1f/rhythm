@@ -22,6 +22,8 @@ enum ActivityItem: Identifiable {
 struct ExpandedPanelView: View {
     let sessionStore: SessionStore
     let usageService: ClaudeUsageService
+    var agentSession: AgentSessionManager = .shared
+    var voiceOrchestrator: VoiceOrchestrator = .shared
     @Binding var showingSettings: Bool
     @Binding var showingSessionActivity: Bool
     @Binding var isActivityCollapsed: Bool
@@ -58,11 +60,22 @@ struct ExpandedPanelView: View {
         sessionStore.activeSessionCount >= 2 && !showingSessionActivity
     }
 
+    private var hasActiveAgent: Bool {
+        agentSession.activeProvider?.isRunning == true
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 if !showingSettings {
-                    if shouldShowSessionPicker {
+                    if hasActiveAgent {
+                        // Active agent conversation
+                        AgentConversationView(
+                            agentSession: agentSession,
+                            voiceOrchestrator: voiceOrchestrator
+                        )
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    } else if shouldShowSessionPicker {
                         sessionPickerContent(geometry: geometry)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     } else {
@@ -80,6 +93,7 @@ struct ExpandedPanelView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: showingSettings)
         .animation(.easeInOut(duration: 0.25), value: shouldShowSessionPicker)
+        .animation(.easeInOut(duration: 0.25), value: hasActiveAgent)
         .onChange(of: showingSettings) { _, isShowing in
             if !isShowing {
                 UpdateManager.shared.clearTransientStatus()
@@ -259,21 +273,57 @@ struct ExpandedPanelView: View {
     }
 
     private var emptyState: some View {
-        let hooksInstalled = HookInstaller.isInstalled()
-        let title = hooksInstalled ? "Waiting for activity" : "Hooks not installed"
-        let subtitle = hooksInstalled
-            ? "Send a message in Claude Code to start tracking"
-            : "Open settings to set up Claude Code integration"
-
-        return VStack(spacing: 8) {
-            Text(title)
+        VStack(spacing: 12) {
+            Text("No active sessions")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(TerminalColors.secondaryText)
-            Text(subtitle)
-                .font(.system(size: 12))
+
+            Button(action: {
+                pickDirectoryAndStartSession()
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 14))
+                    Text("New Session")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Text("Hold Fn to speak · Pick a folder to start Claude Code")
+                .font(.system(size: 10))
                 .foregroundColor(TerminalColors.dimmedText)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func pickDirectoryAndStartSession() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a project folder to start Claude Code"
+        panel.prompt = "Start Session"
+
+        // Temporarily make app regular so the panel shows
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        panel.begin { response in
+            defer {
+                NSApp.setActivationPolicy(.accessory)
+            }
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                await AgentSessionManager.shared.startSession(in: url)
+            }
+        }
     }
 }
 
