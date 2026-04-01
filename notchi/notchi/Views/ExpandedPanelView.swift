@@ -178,6 +178,11 @@ struct ExpandedPanelView: View {
                     WorkingIndicatorView(state: state)
                 }
 
+                if voiceOrchestrator.presentationState.currentState != .idle && !isActivityCollapsed {
+                    VoiceRecordingBarView(state: voiceOrchestrator.presentationState)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: voiceOrchestrator.presentationState.currentState.isRecording)
+                }
+
                 UsageBarView(
                     usage: usageService.currentUsage,
                     isLoading: usageService.isLoading,
