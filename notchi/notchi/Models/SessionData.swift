@@ -20,6 +20,7 @@ final class SessionData: Identifiable {
     let spriteYOffset: CGFloat
     let isInteractive: Bool
     private(set) var pid: Int?
+    private(set) var tty: String?
 
     private(set) var task: NotchiTask = .idle
     let emotionState = EmotionState()
@@ -141,6 +142,10 @@ final class SessionData: Identifiable {
 
     func updatePid(_ pid: Int?) {
         if let pid { self.pid = pid }
+    }
+
+    func updateTty(_ newTty: String?) {
+        if let newTty { tty = newTty }
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {

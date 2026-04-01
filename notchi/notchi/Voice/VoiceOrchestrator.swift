@@ -182,8 +182,23 @@ final class VoiceOrchestrator {
                     return
                 }
 
-                DiagLog.shared.write("VOICE: Transcript ready (\(transcript.count) chars), pasting via Cmd+V")
-                AccessibilityService.shared.pasteText(transcript)
+                // Route: if the notch panel is open and there's an active session with a known tty,
+                // inject directly into Claude Code's terminal. Otherwise paste to the frontmost app.
+                let panelOpen = NotchPanelManager.shared.isExpanded
+                let activeSession = SessionStore.shared.effectiveSession
+
+                if panelOpen, let session = activeSession, let tty = session.tty, session.task != .sleeping {
+                    DiagLog.shared.write("VOICE: Routing \(transcript.count) chars to session tty \(tty)")
+                    presentationState.currentState = .processing(hint: "sending…")
+                    let ok = await TTYInputService.shared.injectText(transcript, into: tty)
+                    if !ok {
+                        DiagLog.shared.write("VOICE: TTY injection failed, falling back to paste")
+                        AccessibilityService.shared.pasteText(transcript)
+                    }
+                } else {
+                    DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")
+                    AccessibilityService.shared.pasteText(transcript)
+                }
 
                 presentationState.currentState = .success
                 try? await Task.sleep(for: .seconds(0.6))

@@ -54,6 +54,7 @@ final class SessionStore {
         let isInteractive = event.interactive ?? true
         let session = getOrCreateSession(sessionId: event.sessionId, cwd: event.cwd, isInteractive: isInteractive)
         session.updatePid(event.pid)
+        session.updateTty(event.tty)
         let isProcessing = event.status != "waiting_for_input"
         session.updateProcessingState(isProcessing: isProcessing)
 
