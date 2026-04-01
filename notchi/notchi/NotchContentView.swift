@@ -205,6 +205,12 @@ struct NotchContentView: View {
                     Spacer()
                     headerButtons
                 }
+                .overlay {
+                    if voiceState.currentState != .idle {
+                        VoiceCompactView(state: voiceState)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .padding(.top, 4)
                 .padding(.horizontal, 8)
                 .frame(width: NotchConstants.expandedPanelSize.width - 48)
