@@ -182,28 +182,37 @@ final class VoiceOrchestrator {
                     return
                 }
 
-                // Route: if the notch panel is open and there's an active session, inject into its tty.
+                // Route: if the notch panel is open, try to inject into the active Claude tty.
                 let panelOpen = NotchPanelManager.shared.isExpanded
                 let activeSession = SessionStore.shared.effectiveSession
 
-                if panelOpen, let session = activeSession, session.task != .sleeping {
-                    // Show the transcript as a bubble in the chat thread immediately.
+                if panelOpen, let session = activeSession {
+                    // Show transcript bubble immediately (optimistic).
                     SessionStore.shared.recordVoicePrompt(transcript, for: session.id)
-
-                    // Resolve tty: use stored value or fall back to ps lookup from pid.
                     presentationState.currentState = .processing(hint: "sending…")
+
+                    // Resolve tty — three escalating fallbacks:
+                    // 1. Stored tty from hook events
+                    // 2. ps lookup from stored pid (works if same process is still alive)
+                    // 3. System-wide scan for any running claude process
                     let resolvedTTY: String?
                     if let stored = session.tty {
                         resolvedTTY = stored
-                    } else if let pid = session.pid {
-                        resolvedTTY = await Task.detached(priority: .userInitiated) { TTYInputService.lookupTTY(for: pid) }.value
+                        DiagLog.shared.write("VOICE: Using stored tty \(stored)")
+                    } else if let pid = session.pid,
+                              let found = await Task.detached(priority: .userInitiated) { TTYInputService.lookupTTY(for: pid) }.value {
+                        resolvedTTY = found
+                        DiagLog.shared.write("VOICE: ps lookup found tty \(found) for pid \(pid)")
                     } else {
-                        resolvedTTY = nil
+                        let cwd = session.cwd
+                        resolvedTTY = await Task.detached(priority: .userInitiated) {
+                            TTYInputService.findClaudeTTY(preferringCWD: cwd)
+                        }.value
+                        if let t = resolvedTTY { DiagLog.shared.write("VOICE: System scan found tty \(t)") }
+                        else { DiagLog.shared.write("VOICE: No claude tty found system-wide") }
                     }
-                    let tty = resolvedTTY
 
-                    if let tty {
-                        DiagLog.shared.write("VOICE: Routing \(transcript.count) chars to tty \(tty)")
+                    if let tty = resolvedTTY {
                         let ok = await TTYInputService.shared.injectText(transcript, into: tty)
                         if !ok {
                             DiagLog.shared.write("VOICE: TTY injection failed")
@@ -214,7 +223,12 @@ final class VoiceOrchestrator {
                             return
                         }
                     } else {
-                        DiagLog.shared.write("VOICE: No tty found — bubble shown, no terminal injection")
+                        // No claude terminal found — clear bubble, show actionable hint.
+                        SessionStore.shared.clearVoicePrompt(for: session.id)
+                        presentationState.currentState = .processing(hint: "open Claude in a terminal first")
+                        try? await Task.sleep(for: .seconds(2))
+                        presentationState.reset()
+                        return
                     }
                 } else {
                     DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")

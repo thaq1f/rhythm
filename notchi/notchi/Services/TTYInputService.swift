@@ -76,4 +76,52 @@ while (read(STDIN, my $c, 1)) {
         guard !raw.isEmpty, raw != "??", raw != "?" else { return nil }
         return "/dev/" + raw
     }
+
+    /// Scans all processes for a running `claude` instance with a controlling tty.
+    /// Used as a last resort when the session has no stored tty and the pid is dead.
+    /// Returns the first matching tty, preferring processes in `cwd` if provided.
+    static func findClaudeTTY(preferringCWD cwd: String? = nil) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+        proc.arguments = ["axo", "pid=,tty=,command="]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        guard (try? proc.run()) != nil else { return nil }
+        proc.waitUntilExit()
+        let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+
+        var candidates: [(tty: String, pid: String)] = []
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 2)
+            guard parts.count >= 3 else { continue }
+            let pid = String(parts[0])
+            let tty = String(parts[1])
+            let cmd = String(parts[2])
+            guard tty != "??", tty != "?", cmd.contains("claude") else { continue }
+            candidates.append((tty: "/dev/" + tty, pid: pid))
+        }
+
+        guard !candidates.isEmpty else { return nil }
+
+        // If a preferred cwd is given, try to match via lsof
+        if let cwd, !candidates.isEmpty {
+            for c in candidates {
+                let lsof = Process()
+                lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+                lsof.arguments = ["-p", c.pid, "-a", "-d", "cwd", "-Fn"]
+                let lout = Pipe()
+                lsof.standardOutput = lout
+                lsof.standardError = Pipe()
+                if (try? lsof.run()) != nil {
+                    lsof.waitUntilExit()
+                    let loutput = String(data: lout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    if loutput.contains(cwd) { return c.tty }
+                }
+            }
+        }
+
+        return candidates.first?.tty
+    }
+
 }
