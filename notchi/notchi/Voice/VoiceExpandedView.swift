@@ -177,6 +177,19 @@ struct VoiceExpandedView: View {
                 .padding(.horizontal, 10).padding(.vertical, 5)
                 .background(Color.white.opacity(0.08)).clipShape(Capsule())
 
+                Button(action: {
+                    AccessibilityService.shared.pasteText(response)
+                }) {
+                    Label(
+                        AccessibilityService.shared.isGranted ? "Paste" : "Enable Paste…",
+                        systemImage: AccessibilityService.shared.isGranted ? "doc.on.clipboard" : "lock.shield"
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.plain).foregroundColor(.white.opacity(0.7))
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.white.opacity(0.08)).clipShape(Capsule())
+
                 Spacer()
                 Button(action: { onDismiss?() }) {
                     Text("Dismiss").font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.5))
