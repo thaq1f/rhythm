@@ -223,12 +223,12 @@ final class VoiceOrchestrator {
                             return
                         }
                     } else {
-                        // No claude terminal found — clear bubble, show actionable hint.
+                        // No interactive terminal found — fall back to paste+Return.
+                        // Conductor (and other GUI apps) remain the frontmost app since the
+                        // notch panel is non-activating, so paste goes directly to their input.
+                        DiagLog.shared.write("VOICE: No interactive tty — pasting to frontmost app")
                         SessionStore.shared.clearVoicePrompt(for: session.id)
-                        presentationState.currentState = .processing(hint: "open Claude in a terminal first")
-                        try? await Task.sleep(for: .seconds(2))
-                        presentationState.reset()
-                        return
+                        AccessibilityService.shared.pasteTextAndReturn(transcript)
                     }
                 } else {
                     DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")

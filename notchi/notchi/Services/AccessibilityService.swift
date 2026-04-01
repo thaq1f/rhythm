@@ -63,6 +63,30 @@ final class AccessibilityService {
         }
     }
 
+    /// Copies text and sends Cmd+V followed by Return to the frontmost app.
+    /// Used for non-interactive sessions (e.g. Conductor) where the chat input is active.
+    func pasteTextAndReturn(_ text: String) {
+        guard isGranted else { requestPermission(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            let vKey: CGKeyCode = 9    // V
+            let retKey: CGKeyCode = 36 // Return
+            func post(_ key: CGKeyCode, down: Bool, flags: CGEventFlags = []) {
+                guard let e = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down) else { return }
+                e.flags = flags
+                e.post(tap: .cghidEventTap)
+            }
+            post(vKey, down: true,  flags: .maskCommand)
+            post(vKey, down: false, flags: .maskCommand)
+            try? await Task.sleep(for: .milliseconds(80))
+            post(retKey, down: true)
+            post(retKey, down: false)
+            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars + Return to frontmost app")
+        }
+    }
+
     /// Copies text to clipboard and simulates Cmd+V in the frontmost app.
     func pasteText(_ text: String) {
         guard isGranted else {

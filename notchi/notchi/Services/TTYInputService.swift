@@ -99,6 +99,8 @@ while (read(STDIN, my $c, 1)) {
             let tty = String(parts[1])
             let cmd = String(parts[2])
             guard tty != "??", tty != "?", cmd.contains("claude") else { continue }
+            let isNonInteractive = cmd.contains("--print") || cmd.contains(" -p ") || cmd.contains(" -p\t")
+            guard !isNonInteractive else { continue }
             candidates.append((tty: "/dev/" + tty, pid: pid))
         }
 
