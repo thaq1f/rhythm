@@ -44,6 +44,9 @@ final class VoiceOrchestrator {
             permissionGranted = false
         }
 
+        // Start loading Parakeet model in background so it's ready for first Fn press
+        Task { await TranscriptionService.shared.warmUp() }
+
         logger.info("Voice orchestrator started (mic: \(String(describing: self.permissionGranted)))")
     }
 
@@ -160,19 +163,38 @@ final class VoiceOrchestrator {
     }
 
     private func processRecording(audioURL: URL?) {
-        // TODO: Wire real transcription
         Task {
-            try? await Task.sleep(for: .seconds(1.5))
-
-            let transcript = "Hello Claude"
-            let sessionManager = AgentSessionManager.shared
-            if sessionManager.activeProvider?.isRunning == true {
-                await sessionManager.sendVoicePrompt(transcript)
+            guard let audioURL else {
+                DiagLog.shared.write("VOICE: No audio URL, resetting")
+                presentationState.reset()
+                return
             }
 
-            presentationState.currentState = .success
-            try? await Task.sleep(for: .seconds(0.6))
-            presentationState.reset()
+            do {
+                let transcript = try await TranscriptionService.shared.transcribe(audioURL)
+
+                // Clean up temp audio file
+                try? FileManager.default.removeItem(at: audioURL)
+
+                guard !transcript.isEmpty else {
+                    DiagLog.shared.write("VOICE: Empty transcript, resetting")
+                    presentationState.reset()
+                    return
+                }
+
+                DiagLog.shared.write("VOICE: Transcript ready (\(transcript.count) chars), pasting via Cmd+V")
+                AccessibilityService.shared.pasteText(transcript)
+
+                presentationState.currentState = .success
+                try? await Task.sleep(for: .seconds(0.6))
+                presentationState.reset()
+            } catch {
+                logger.error("Transcription failed: \(error)")
+                DiagLog.shared.write("VOICE: Transcription error: \(error.localizedDescription)")
+                presentationState.currentState = .processing(hint: "Transcription failed")
+                try? await Task.sleep(for: .seconds(1.5))
+                presentationState.reset()
+            }
         }
     }
 

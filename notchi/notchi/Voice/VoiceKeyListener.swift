@@ -210,7 +210,9 @@ final class VoiceKeyListener {
     }
 
     func recheckAccessibility() {
-        if eventTap == nil {
+        if !tapConsumesEvents {
+            // We have a .listenOnly tap (or none). Stop it and try .defaultTap again.
+            stopCGEventTap()
             startCGEventTap()
         } else if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)

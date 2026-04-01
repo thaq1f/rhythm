@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		47C923A02F2CFA1F00EA1E18 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 47C923A12F2CFA1F00EA1E18 /* Sparkle */; };
+		A1FA00012F6C000000000001 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = A1FA00022F6C000000000001 /* FluidAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +45,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				47C923A02F2CFA1F00EA1E18 /* Sparkle in Frameworks */,
+				A1FA00012F6C000000000001 /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,6 +98,7 @@
 			name = notchi;
 			packageProductDependencies = (
 				47C923A12F2CFA1F00EA1E18 /* Sparkle */,
+				A1FA00022F6C000000000001 /* FluidAudio */,
 			);
 			productName = notchi;
 			productReference = 47C922822F2CFA1F00EA1E18 /* notchi.app */;
@@ -154,6 +157,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				47C923A22F2CFA1F00EA1E18 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				A1FA00032F6C000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 47C922832F2CFA1F00EA1E18 /* Products */;
@@ -351,13 +355,14 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Rhythm;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.notchi;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.rhythm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -387,13 +392,14 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Rhythm;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.notchi;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.rhythm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -419,7 +425,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.notchi.Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.rhythm.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -446,7 +452,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.notchi.Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ruban.rhythm.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -500,6 +506,14 @@
 				minimumVersion = 2.0.0;
 			};
 		};
+		A1FA00032F6C000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/thaq1f/FluidAudio";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -507,6 +521,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 47C923A22F2CFA1F00EA1E18 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		A1FA00022F6C000000000001 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1FA00032F6C000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

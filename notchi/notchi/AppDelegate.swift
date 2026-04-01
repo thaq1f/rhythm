@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         DiagLog.shared.write("APP: Restoring sessions")
         SessionStore.shared.restoreSessions()
         startUsageService()
+        // Request accessibility BEFORE voice services — CGEvent tap needs it for .defaultTap
+        AccessibilityService.shared.requestPermissionIfNeeded()
         DiagLog.shared.write("APP: Starting voice services")
         startVoiceServices()
         DiagLog.shared.write("APP: Startup complete")
