@@ -182,18 +182,39 @@ final class VoiceOrchestrator {
                     return
                 }
 
-                // Route: if the notch panel is open and there's an active session with a known tty,
-                // inject directly into Claude Code's terminal. Otherwise paste to the frontmost app.
+                // Route: if the notch panel is open and there's an active session, inject into its tty.
                 let panelOpen = NotchPanelManager.shared.isExpanded
                 let activeSession = SessionStore.shared.effectiveSession
 
-                if panelOpen, let session = activeSession, let tty = session.tty, session.task != .sleeping {
-                    DiagLog.shared.write("VOICE: Routing \(transcript.count) chars to session tty \(tty)")
+                if panelOpen, let session = activeSession, session.task != .sleeping {
+                    // Show the transcript as a bubble in the chat thread immediately.
+                    SessionStore.shared.recordVoicePrompt(transcript, for: session.id)
+
+                    // Resolve tty: use stored value or fall back to ps lookup from pid.
                     presentationState.currentState = .processing(hint: "sending…")
-                    let ok = await TTYInputService.shared.injectText(transcript, into: tty)
-                    if !ok {
-                        DiagLog.shared.write("VOICE: TTY injection failed, falling back to paste")
-                        AccessibilityService.shared.pasteText(transcript)
+                    let resolvedTTY: String?
+                    if let stored = session.tty {
+                        resolvedTTY = stored
+                    } else if let pid = session.pid {
+                        resolvedTTY = await Task.detached(priority: .userInitiated) { TTYInputService.lookupTTY(for: pid) }.value
+                    } else {
+                        resolvedTTY = nil
+                    }
+                    let tty = resolvedTTY
+
+                    if let tty {
+                        DiagLog.shared.write("VOICE: Routing \(transcript.count) chars to tty \(tty)")
+                        let ok = await TTYInputService.shared.injectText(transcript, into: tty)
+                        if !ok {
+                            DiagLog.shared.write("VOICE: TTY injection failed")
+                            SessionStore.shared.clearVoicePrompt(for: session.id)
+                            presentationState.currentState = .processing(hint: "couldn't reach Claude")
+                            try? await Task.sleep(for: .seconds(1.5))
+                            presentationState.reset()
+                            return
+                        }
+                    } else {
+                        DiagLog.shared.write("VOICE: No tty found — bubble shown, no terminal injection")
                     }
                 } else {
                     DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")

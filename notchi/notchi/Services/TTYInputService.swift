@@ -59,4 +59,21 @@ while (read(STDIN, my $c, 1)) {
             return true
         }.value
     }
+
+    /// Looks up the tty path for a running process via `ps`.
+    /// Returns e.g. "/dev/ttys003", or nil if not attached to a tty.
+    static func lookupTTY(for pid: Int) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+        proc.arguments = ["-p", "\(pid)", "-o", "tty="]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        guard (try? proc.run()) != nil else { return nil }
+        proc.waitUntilExit()
+        let raw = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty, raw != "??", raw != "?" else { return nil }
+        return "/dev/" + raw
+    }
 }

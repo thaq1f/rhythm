@@ -219,7 +219,15 @@ struct ExpandedPanelView: View {
                     ScrollViewReader { proxy in
                         ScrollView(showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
-                                if let prompt = effectiveSession?.lastUserPrompt {
+                                if let voicePrompt = effectiveSession?.pendingVoicePrompt {
+                                    VoicePromptBubbleView(text: voicePrompt)
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                        .padding(.bottom, 8)
+                                        .transition(.asymmetric(
+                                            insertion: .scale(scale: 0.85, anchor: .trailing).combined(with: .opacity),
+                                            removal: .opacity.animation(.easeOut(duration: 0.15))
+                                        ))
+                                } else if let prompt = effectiveSession?.lastUserPrompt {
                                     UserPromptBubbleView(text: prompt)
                                         .frame(maxWidth: .infinity, alignment: .trailing)
                                         .padding(.bottom, 8)

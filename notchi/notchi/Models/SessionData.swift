@@ -35,6 +35,7 @@ final class SessionData: Identifiable {
     private(set) var promptSubmitTime: Date?
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
+    private(set) var pendingVoicePrompt: String?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -155,6 +156,11 @@ final class SessionData: Identifiable {
 
     func clearPendingQuestions() {
         pendingQuestions = []
+    }
+
+    func setPendingVoicePrompt(_ text: String?) {
+        pendingVoicePrompt = text
+        if text != nil { lastActivity = Date() }
     }
 
     func recordPreToolUse(tool: String?, toolInput: [String: Any]?, toolUseId: String?) {

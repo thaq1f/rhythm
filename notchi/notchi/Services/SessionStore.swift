@@ -64,6 +64,7 @@ final class SessionStore {
 
         switch event.event {
         case "UserPromptSubmit":
+            session.setPendingVoicePrompt(nil)
             if let prompt = event.userPrompt {
                 session.recordUserPrompt(prompt)
             }
@@ -123,6 +124,14 @@ final class SessionStore {
 
         schedulePersist()
         return session
+    }
+
+    func recordVoicePrompt(_ text: String, for sessionId: String) {
+        sessions[sessionId]?.setPendingVoicePrompt(text)
+    }
+
+    func clearVoicePrompt(for sessionId: String) {
+        sessions[sessionId]?.setPendingVoicePrompt(nil)
     }
 
     func recordAssistantMessages(_ messages: [AssistantMessage], for sessionId: String) {
