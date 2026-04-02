@@ -67,10 +67,22 @@ final class AccessibilityService {
     /// Used for non-interactive sessions (e.g. Conductor) where the chat input is active.
     func pasteTextAndReturn(_ text: String) {
         guard isGranted else { requestPermission(); return }
+
+        // Snapshot the target app now (before any async gap changes frontmost state).
+        let targetApp = NSWorkspace.shared.frontmostApplication
+        let targetName = targetApp?.localizedName ?? targetApp?.bundleIdentifier ?? "unknown"
+        DiagLog.shared.write("ACCESSIBILITY: pasteAndReturn — target=\(targetName)")
+
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        Task {
-            try? await Task.sleep(for: .milliseconds(50))
+
+        Task { @MainActor in
+            // Explicitly activate the target app so its window becomes key.
+            // The notch panel is non-activating, so hovering over it can leave
+            // no window with keyboard focus — events would go into the void.
+            targetApp?.activate(options: .activateIgnoringOtherApps)
+            try? await Task.sleep(for: .milliseconds(150))
+
             let vKey: CGKeyCode = 9    // V
             let retKey: CGKeyCode = 36 // Return
             func post(_ key: CGKeyCode, down: Bool, flags: CGEventFlags = []) {
@@ -80,10 +92,10 @@ final class AccessibilityService {
             }
             post(vKey, down: true,  flags: .maskCommand)
             post(vKey, down: false, flags: .maskCommand)
-            try? await Task.sleep(for: .milliseconds(80))
+            try? await Task.sleep(for: .milliseconds(100))
             post(retKey, down: true)
             post(retKey, down: false)
-            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars + Return to frontmost app")
+            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars + Return to \(targetName)")
         }
     }
 
