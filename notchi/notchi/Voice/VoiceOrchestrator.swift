@@ -252,16 +252,16 @@ final class VoiceOrchestrator {
                             $0.bundleIdentifier?.lowercased().contains("conductor") == true
                         }
                         if let target = conductorApp {
-                            // Check that Conductor's active workspace matches the notch session.
-                            let lastHook = SessionStore.shared.lastHookSessionId
-                            if let lastHook, lastHook != session.id {
-                                DiagLog.shared.write("VOICE: Conductor workspace mismatch — active=\(lastHook.prefix(8))… notch=\(session.id.prefix(8))…")
-                                presentationState.currentState = .processing(hint: "switch to \(session.projectName) in Conductor")
-                                try? await Task.sleep(for: .seconds(2.5))
-                                presentationState.reset()
-                                return
+                            // Navigate Conductor to the correct workspace before pasting.
+                            // Uses Accessibility tree traversal to click the matching workspace tab.
+                            target.activate(options: .activateIgnoringOtherApps)
+                            try? await Task.sleep(for: .milliseconds(200))
+                            let workspaceName = session.projectName
+                            let navigated = AccessibilityService.shared.navigateToWorkspace(workspaceName, in: target)
+                            if navigated {
+                                try? await Task.sleep(for: .milliseconds(400))
                             }
-                            DiagLog.shared.write("VOICE: No tty — pasting+Return to Conductor (\(target.localizedName ?? "?"))")
+                            DiagLog.shared.write("VOICE: Pasting to Conductor workspace '\(workspaceName)' (navigated=\(navigated))")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {
                             DiagLog.shared.write("VOICE: No tty, no Claude host found — showing hint")

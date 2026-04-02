@@ -63,6 +63,54 @@ final class AccessibilityService {
         }
     }
 
+    /// Traverses the accessibility tree of `app` and clicks the first actionable
+    /// element whose title or description contains `workspaceName`.
+    /// Used to switch Conductor (or any multi-tab host) to the correct workspace
+    /// before pasting a voice transcript.
+    func navigateToWorkspace(_ workspaceName: String, in app: NSRunningApplication) -> Bool {
+        guard isGranted else { return false }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        let found = clickFirstMatch(text: workspaceName, in: appElement, depth: 0)
+        DiagLog.shared.write("ACCESSIBILITY: navigateToWorkspace('\(workspaceName)') -> \(found ? "clicked" : "not found")")
+        return found
+    }
+
+    private func clickFirstMatch(text: String, in element: AXUIElement, depth: Int) -> Bool {
+        guard depth < 8 else { return false }
+
+        var titleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+        let title = (titleRef as? String) ?? ""
+
+        var descRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descRef)
+        let desc = (descRef as? String) ?? ""
+
+        let matches = title.localizedCaseInsensitiveContains(text) ||
+                      desc.localizedCaseInsensitiveContains(text)
+
+        if matches {
+            var actionNames: CFArray?
+            AXUIElementCopyActionNames(element, &actionNames)
+            let actionList = (actionNames as? [String]) ?? []
+            if actionList.contains(kAXPressAction as String) {
+                let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+                if result == .success {
+                    DiagLog.shared.write("ACCESSIBILITY: Clicked \'\(title)\' (depth=\(depth))")
+                    return true
+                }
+            }
+        }
+
+        var childrenRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+        guard let children = childrenRef as? [AXUIElement] else { return false }
+        for child in children {
+            if clickFirstMatch(text: text, in: child, depth: depth + 1) { return true }
+        }
+        return false
+    }
+
     /// Copies text and sends Cmd+V followed by Return to a specific target app.
     /// Pass targetApp explicitly — never relies on "frontmost" to avoid routing to
     /// unrelated apps (Telegram, Safari, etc.) that happened to be focused before
