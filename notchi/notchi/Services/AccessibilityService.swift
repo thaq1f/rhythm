@@ -71,12 +71,29 @@ final class AccessibilityService {
         guard isGranted else { return false }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let found = clickFirstMatch(text: workspaceName, in: appElement, depth: 0)
+        if !found {
+            // Dump matching elements so we can identify the right one.
+            dumpMatchingElements(text: workspaceName, in: appElement, depth: 0)
+        }
         DiagLog.shared.write("ACCESSIBILITY: navigateToWorkspace('\(workspaceName)') -> \(found ? "clicked" : "not found")")
         return found
     }
 
+    /// Allowed roles for workspace navigation clicks.
+    /// File browser icons, images, and static text are excluded to avoid
+    /// opening Finder or triggering the wrong element.
+    private static let clickableRoles: Set<String> = [
+        kAXButtonRole as String,
+        kAXCellRole as String,
+        kAXMenuItemRole as String,
+        "AXLink",
+        "AXTabGroup",
+        "AXTab",
+        "AXRadioButton",
+    ]
+
     private func clickFirstMatch(text: String, in element: AXUIElement, depth: Int) -> Bool {
-        guard depth < 8 else { return false }
+        guard depth < 10 else { return false }
 
         var titleRef: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
@@ -90,14 +107,23 @@ final class AccessibilityService {
                       desc.localizedCaseInsensitiveContains(text)
 
         if matches {
-            var actionNames: CFArray?
-            AXUIElementCopyActionNames(element, &actionNames)
-            let actionList = (actionNames as? [String]) ?? []
-            if actionList.contains(kAXPressAction as String) {
-                let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
-                if result == .success {
-                    DiagLog.shared.write("ACCESSIBILITY: Clicked \'\(title)\' (depth=\(depth))")
-                    return true
+            // Only click UI controls — skip file browser icons, images, static text.
+            var roleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+            let role = (roleRef as? String) ?? ""
+            let titleLower = title.lowercased()
+            let isFileIcon = titleLower.contains("icon") || titleLower.contains("finder")
+
+            if Self.clickableRoles.contains(role) && !isFileIcon {
+                var actionNames: CFArray?
+                AXUIElementCopyActionNames(element, &actionNames)
+                let actionList = (actionNames as? [String]) ?? []
+                if actionList.contains(kAXPressAction as String) {
+                    let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+                    if result == .success {
+                        DiagLog.shared.write("ACCESSIBILITY: Clicked \(role) '\(title)' (depth=\(depth))")
+                        return true
+                    }
                 }
             }
         }
@@ -109,6 +135,23 @@ final class AccessibilityService {
             if clickFirstMatch(text: text, in: child, depth: depth + 1) { return true }
         }
         return false
+    }
+
+    private func dumpMatchingElements(text: String, in element: AXUIElement, depth: Int) {
+        guard depth < 6 else { return }
+        var titleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+        let title = (titleRef as? String) ?? ""
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = (roleRef as? String) ?? ""
+        if title.localizedCaseInsensitiveContains(text) {
+            DiagLog.shared.write("ACCESSIBILITY: candidate — role=\(role) title='\(title)' depth=\(depth)")
+        }
+        var childrenRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+        guard let children = childrenRef as? [AXUIElement] else { return }
+        for child in children { dumpMatchingElements(text: text, in: child, depth: depth + 1) }
     }
 
     /// Copies text and sends Cmd+V followed by Return to a specific target app.
