@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import os.log
 
 private nonisolated(unsafe) let logger = Logger(subsystem: "com.ruban.notchi", category: "TTYInput")
@@ -118,6 +119,49 @@ while (read(STDIN, my $c, 1)) {
             if first == nil { first = ttyPath }
         }
         return first
+    }
+
+
+    /// Finds the terminal app (Terminal, iTerm2, etc.) that owns a Claude Code process.
+    /// Walks the process tree upward from `pid` to find a known terminal application.
+    static func findTerminalApp(for pid: Int) -> NSRunningApplication? {
+        let knownTerminals: Set<String> = [
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.Warp-Stable",
+            "com.warp.Warp",
+            "net.kovidgoyal.kitty",
+            "com.github.alacritty",
+            "co.zeit.hyper",
+        ]
+        let knownNames: Set<String> = ["terminal", "iterm2", "iterm", "warp", "kitty", "alacritty", "hyper"]
+
+        // Walk up the process tree: claude → shell → terminal
+        var current = pid
+        for _ in 0..<5 {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+            proc.arguments = ["-o", "ppid=", "-p", "\(current)"]
+            let out = Pipe()
+            proc.standardOutput = out
+            proc.standardError = Pipe()
+            guard (try? proc.run()) != nil else { break }
+            proc.waitUntilExit()
+            let raw = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let ppid = Int(raw), ppid > 1 else { break }
+            current = ppid
+
+            // Check if this pid belongs to a known terminal app
+            if let app = NSWorkspace.shared.runningApplications.first(where: {
+                $0.processIdentifier == Int32(current) &&
+                (knownTerminals.contains($0.bundleIdentifier ?? "") ||
+                 knownNames.contains($0.localizedName?.lowercased() ?? ""))
+            }) {
+                return app
+            }
+        }
+        return nil
     }
 
 }

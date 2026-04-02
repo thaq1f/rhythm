@@ -234,9 +234,25 @@ final class VoiceOrchestrator {
                     }
 
                     if let tty = resolvedTTY {
-                        let ok = await TTYInputService.shared.injectText(transcript, into: tty)
-                        if !ok {
-                            DiagLog.shared.write("VOICE: TTY injection failed")
+                        var sent = await TTYInputService.shared.injectText(transcript, into: tty)
+                        if !sent {
+                            // TIOCSTI blocked on modern macOS — paste into the terminal app instead.
+                            DiagLog.shared.write("VOICE: TIOCSTI failed — falling back to terminal paste")
+                            if let pid = session.pid, pid > 0 {
+                                let termApp = await Task.detached(priority: .userInitiated) {
+                                    TTYInputService.findTerminalApp(for: pid)
+                                }.value
+                                if let termApp {
+                                    termApp.activate(options: .activateIgnoringOtherApps)
+                                    try? await Task.sleep(for: .milliseconds(200))
+                                    AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: termApp)
+                                    sent = true
+                                    DiagLog.shared.write("VOICE: Pasted to terminal \(termApp.localizedName ?? "?")")
+                                }
+                            }
+                        }
+                        if !sent {
+                            DiagLog.shared.write("VOICE: Could not reach terminal")
                             SessionStore.shared.clearVoicePrompt(for: session.id)
                             presentationState.currentState = .processing(hint: "couldn't reach Claude")
                             try? await Task.sleep(for: .seconds(1.5))
@@ -244,15 +260,13 @@ final class VoiceOrchestrator {
                             return
                         }
                     } else {
-                        // No interactive TTY found. Never paste into a random app
-                        // (Telegram, Safari, etc.) — only route to known Claude hosts.
+                        // No TTY — session is from Conductor or similar non-terminal host.
                         SessionStore.shared.clearVoicePrompt(for: session.id)
                         let conductorApp = NSWorkspace.shared.runningApplications.first {
                             $0.localizedName?.lowercased().contains("conductor") == true ||
                             $0.bundleIdentifier?.lowercased().contains("conductor") == true
                         }
                         if let target = conductorApp {
-                            // Activate Conductor and focus its terminal input directly.
                             target.activate(options: .activateIgnoringOtherApps)
                             try? await Task.sleep(for: .milliseconds(200))
                             let focused = AccessibilityService.shared.focusConductorInput(in: target)
@@ -262,8 +276,8 @@ final class VoiceOrchestrator {
                             DiagLog.shared.write("VOICE: Sending to Conductor (focused=\(focused))")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {
-                            DiagLog.shared.write("VOICE: No tty, no Claude host found — showing hint")
-                            presentationState.currentState = .processing(hint: "start a Claude session first")
+                            DiagLog.shared.write("VOICE: No tty, no Conductor — showing hint")
+                            presentationState.currentState = .processing(hint: "start Claude in a terminal first")
                             try? await Task.sleep(for: .seconds(2))
                             presentationState.reset()
                             return
