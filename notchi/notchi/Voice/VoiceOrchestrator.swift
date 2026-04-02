@@ -215,10 +215,10 @@ final class VoiceOrchestrator {
                     SessionStore.shared.recordVoicePrompt(transcript, for: session.id)
                     presentationState.currentState = .processing(hint: isClaudeBusy ? "queuing…" : "sending…")
 
-                    // Resolve tty — three escalating fallbacks:
-                    // 1. Stored tty from hook events
-                    // 2. ps lookup from stored pid (works if same process is still alive)
-                    // 3. System-wide scan for any running claude process
+                    // Resolve tty from this session's own identity only.
+                    // System-wide process scan is intentionally absent — it would find
+                    // an unrelated terminal Claude and inject there instead of the
+                    // correct target (e.g. it would miss Conductor and hit a Terminal).
                     let resolvedTTY: String?
                     if let stored = session.tty {
                         resolvedTTY = stored
@@ -228,12 +228,8 @@ final class VoiceOrchestrator {
                         resolvedTTY = found
                         DiagLog.shared.write("VOICE: ps lookup found tty \(found) for pid \(pid)")
                     } else {
-                        let cwd = session.cwd
-                        resolvedTTY = await Task.detached(priority: .userInitiated) {
-                            TTYInputService.findClaudeTTY(preferringCWD: cwd)
-                        }.value
-                        if let t = resolvedTTY { DiagLog.shared.write("VOICE: System scan found tty \(t)") }
-                        else { DiagLog.shared.write("VOICE: No claude tty found system-wide") }
+                        resolvedTTY = nil
+                        DiagLog.shared.write("VOICE: No tty for session — falling back to paste")
                     }
 
                     if let tty = resolvedTTY {
@@ -247,10 +243,10 @@ final class VoiceOrchestrator {
                             return
                         }
                     } else {
-                        // No interactive terminal found — fall back to paste+Return.
-                        // Conductor (and other GUI apps) remain the frontmost app since the
-                        // notch panel is non-activating, so paste goes directly to their input.
-                        DiagLog.shared.write("VOICE: No interactive tty — pasting to frontmost app")
+                        // No session tty — paste to the last focused app.
+                        // The notch is non-activating, so Conductor / Terminal / whichever
+                        // the user was in before hovering is still the key-event target.
+                        DiagLog.shared.write("VOICE: No session tty — pasting+Return to frontmost app")
                         SessionStore.shared.clearVoicePrompt(for: session.id)
                         AccessibilityService.shared.pasteTextAndReturn(transcript)
                     }
