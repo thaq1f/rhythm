@@ -233,26 +233,19 @@ final class VoiceOrchestrator {
                         DiagLog.shared.write("VOICE: No tty for session — falling back to paste")
                     }
 
-                    if let tty = resolvedTTY {
-                        var sent = await TTYInputService.shared.injectText(transcript, into: tty)
-                        if !sent {
-                            // TIOCSTI blocked on modern macOS — paste into the terminal app instead.
-                            DiagLog.shared.write("VOICE: TIOCSTI failed — falling back to terminal paste")
-                            if let pid = session.pid, pid > 0 {
-                                let termApp = await Task.detached(priority: .userInitiated) {
-                                    TTYInputService.findTerminalApp(for: pid)
-                                }.value
-                                if let termApp {
-                                    termApp.activate(options: .activateIgnoringOtherApps)
-                                    try? await Task.sleep(for: .milliseconds(200))
-                                    AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: termApp)
-                                    sent = true
-                                    DiagLog.shared.write("VOICE: Pasted to terminal \(termApp.localizedName ?? "?")")
-                                }
-                            }
-                        }
-                        if !sent {
-                            DiagLog.shared.write("VOICE: Could not reach terminal")
+                    if resolvedTTY != nil, let pid = session.pid, pid > 0 {
+                        // Find the terminal app and switch to the correct tab.
+                        let cwd = session.cwd
+                        let termApp = await Task.detached(priority: .userInitiated) {
+                            TTYInputService.findAndActivateTerminal(for: pid, cwd: cwd)
+                        }.value
+                        if let termApp {
+                            termApp.activate(options: .activateIgnoringOtherApps)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: termApp)
+                            DiagLog.shared.write("VOICE: Pasted to \(termApp.localizedName ?? "?") for \(session.projectName)")
+                        } else {
+                            DiagLog.shared.write("VOICE: Could not find terminal app for pid \(pid)")
                             SessionStore.shared.clearVoicePrompt(for: session.id)
                             presentationState.currentState = .processing(hint: "couldn't reach Claude")
                             try? await Task.sleep(for: .seconds(1.5))

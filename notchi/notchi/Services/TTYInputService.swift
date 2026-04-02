@@ -122,23 +122,27 @@ while (read(STDIN, my $c, 1)) {
     }
 
 
-    /// Finds the terminal app (Terminal, iTerm2, etc.) that owns a Claude Code process.
-    /// Walks the process tree upward from `pid` to find a known terminal application.
-    static func findTerminalApp(for pid: Int) -> NSRunningApplication? {
+    /// Finds the terminal app that owns a Claude Code process and activates
+    /// the correct tab/window for the session.
+    /// - Parameters:
+    ///   - pid: The Claude Code process PID
+    ///   - cwd: The session's working directory (used to match tab titles)
+    /// - Returns: The terminal NSRunningApplication if found
+    static func findAndActivateTerminal(for pid: Int, cwd: String) -> NSRunningApplication? {
         let knownTerminals: Set<String> = [
-            "com.apple.Terminal",
-            "com.googlecode.iterm2",
-            "dev.warp.Warp-Stable",
-            "com.warp.Warp",
-            "net.kovidgoyal.kitty",
-            "com.github.alacritty",
-            "co.zeit.hyper",
-            "com.mitchellh.ghostty",
+            "com.apple.Terminal", "com.googlecode.iterm2",
+            "dev.warp.Warp-Stable", "com.warp.Warp",
+            "net.kovidgoyal.kitty", "com.github.alacritty",
+            "co.zeit.hyper", "com.mitchellh.ghostty",
         ]
-        let knownNames: Set<String> = ["terminal", "iterm2", "iterm", "warp", "kitty", "alacritty", "hyper", "ghostty"]
+        let knownNames: Set<String> = [
+            "terminal", "iterm2", "iterm", "warp", "kitty",
+            "alacritty", "hyper", "ghostty",
+        ]
 
         // Walk up the process tree: claude → shell → terminal
         var current = pid
+        var termApp: NSRunningApplication?
         for _ in 0..<5 {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -153,16 +157,52 @@ while (read(STDIN, my $c, 1)) {
             guard let ppid = Int(raw), ppid > 1 else { break }
             current = ppid
 
-            // Check if this pid belongs to a known terminal app
             if let app = NSWorkspace.shared.runningApplications.first(where: {
                 $0.processIdentifier == Int32(current) &&
                 (knownTerminals.contains($0.bundleIdentifier ?? "") ||
                  knownNames.contains($0.localizedName?.lowercased() ?? ""))
             }) {
-                return app
+                termApp = app
+                break
             }
         }
-        return nil
+
+        guard let app = termApp else { return nil }
+
+        // Try to switch to the right tab/window using Accessibility.
+        let projectName = (cwd as NSString).lastPathComponent
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        switchToTab(matching: projectName, in: appElement)
+
+        return app
+    }
+
+    /// Searches the AX tree for a tab group and clicks the tab whose title
+    /// contains `text`. Works for Ghostty (AXRadioButton in AXTabGroup),
+    /// Terminal.app, iTerm2, and most terminal emulators.
+    private static func switchToTab(matching text: String, in element: AXUIElement, depth: Int = 0) {
+        guard depth < 6 else { return }
+
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = (roleRef as? String) ?? ""
+
+        // Look for tab-like elements (AXRadioButton in tab bars, AXButton in tab bars)
+        if role == kAXRadioButtonRole as String || role == kAXButtonRole as String {
+            var titleRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &titleRef)
+            let title = (titleRef as? String) ?? ""
+            if title.localizedCaseInsensitiveContains(text) {
+                AXUIElementPerformAction(element, kAXPressAction as CFString)
+                DiagLog.shared.write("TERMINAL: Switched to tab '\(title)' (matched '\(text)')")
+                return
+            }
+        }
+
+        var childrenRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+        guard let children = childrenRef as? [AXUIElement] else { return }
+        for child in children { switchToTab(matching: text, in: child, depth: depth + 1) }
     }
 
 }
