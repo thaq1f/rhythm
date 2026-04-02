@@ -63,13 +63,12 @@ final class AccessibilityService {
         }
     }
 
-    /// Copies text and sends Cmd+V followed by Return to the frontmost app.
-    /// Used for non-interactive sessions (e.g. Conductor) where the chat input is active.
-    func pasteTextAndReturn(_ text: String) {
+    /// Copies text and sends Cmd+V followed by Return to a specific target app.
+    /// Pass targetApp explicitly — never relies on "frontmost" to avoid routing to
+    /// unrelated apps (Telegram, Safari, etc.) that happened to be focused before
+    /// the user hovered the notch.
+    func pasteTextAndReturn(_ text: String, targetApp: NSRunningApplication?) {
         guard isGranted else { requestPermission(); return }
-
-        // Snapshot the target app now (before any async gap changes frontmost state).
-        let targetApp = NSWorkspace.shared.frontmostApplication
         let targetName = targetApp?.localizedName ?? targetApp?.bundleIdentifier ?? "unknown"
         DiagLog.shared.write("ACCESSIBILITY: pasteAndReturn — target=\(targetName)")
 
@@ -77,9 +76,7 @@ final class AccessibilityService {
         NSPasteboard.general.setString(text, forType: .string)
 
         Task { @MainActor in
-            // Explicitly activate the target app so its window becomes key.
-            // The notch panel is non-activating, so hovering over it can leave
-            // no window with keyboard focus — events would go into the void.
+            // Activate the specific app so its window becomes key before we paste.
             targetApp?.activate(options: .activateIgnoringOtherApps)
             try? await Task.sleep(for: .milliseconds(150))
 

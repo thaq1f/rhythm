@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import Observation
@@ -20,6 +21,7 @@ final class VoiceOrchestrator {
     private var isRecording = false
     private var permissionGranted: Bool?  // nil = unchecked
     private var processingTask: Task<Void, Never>?
+    private var recordingOriginApp: NSRunningApplication?
 
     private init() {
         wireKeyListener()
@@ -77,6 +79,7 @@ final class VoiceOrchestrator {
     // MARK: - Record Start (NEVER blocks main thread)
 
     private func handleRecordStart() {
+        recordingOriginApp = NSWorkspace.shared.frontmostApplication
         // Cancel any previous transcription/injection so we don't accumulate stuck tasks.
         processingTask?.cancel()
         processingTask = nil
@@ -166,14 +169,12 @@ final class VoiceOrchestrator {
         presentationState.currentState = .processing(hint: "transcribing…")
 
         let audioURL = capture.stopRecording()
-        processRecording(audioURL: audioURL)
+        processRecording(audioURL: audioURL, originApp: recordingOriginApp)
     }
 
-    private func processRecording(audioURL: URL?) {
+    private func processRecording(audioURL: URL?, originApp: NSRunningApplication?) {
         processingTask?.cancel()
-        // Capture routing state NOW (synchronously, before any async gap).
-        // panelOpen / activeSession must not be read after await — by then the
-        // user may have moved their mouse away and the panel may have collapsed.
+        // Capture routing state synchronously at Fn-UP, before any async gap.
         let panelWasOpen = NotchPanelManager.shared.isExpanded
         let capturedSession = SessionStore.shared.effectiveSession
         processingTask = Task {
@@ -243,16 +244,33 @@ final class VoiceOrchestrator {
                             return
                         }
                     } else {
-                        // No session tty — paste to the last focused app.
-                        // The notch is non-activating, so Conductor / Terminal / whichever
-                        // the user was in before hovering is still the key-event target.
-                        DiagLog.shared.write("VOICE: No session tty — pasting+Return to frontmost app")
+                        // No interactive TTY found. Never paste into a random app
+                        // (Telegram, Safari, etc.) — only route to known Claude hosts.
                         SessionStore.shared.clearVoicePrompt(for: session.id)
-                        AccessibilityService.shared.pasteTextAndReturn(transcript)
+                        let conductorApp = NSWorkspace.shared.runningApplications.first {
+                            $0.localizedName?.lowercased().contains("conductor") == true ||
+                            $0.bundleIdentifier?.lowercased().contains("conductor") == true
+                        }
+                        if let target = conductorApp {
+                            DiagLog.shared.write("VOICE: No tty — pasting+Return to Conductor (\(target.localizedName ?? "?"))")
+                            AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
+                        } else {
+                            DiagLog.shared.write("VOICE: No tty, no Claude host found — showing hint")
+                            presentationState.currentState = .processing(hint: "start a Claude session first")
+                            try? await Task.sleep(for: .seconds(2))
+                            presentationState.reset()
+                            return
+                        }
                     }
                 } else {
-                    DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")
-                    AccessibilityService.shared.pasteText(transcript)
+                    // Panel was closed — use the app that was active at Fn-DOWN time.
+                    if let app = originApp {
+                        DiagLog.shared.write("VOICE: Panel closed — pasting to \(app.localizedName ?? "?")")
+                        AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: app)
+                    } else {
+                        DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")
+                        AccessibilityService.shared.pasteText(transcript)
+                    }
                 }
 
                 presentationState.currentState = .success
