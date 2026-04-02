@@ -171,6 +171,11 @@ final class VoiceOrchestrator {
 
     private func processRecording(audioURL: URL?) {
         processingTask?.cancel()
+        // Capture routing state NOW (synchronously, before any async gap).
+        // panelOpen / activeSession must not be read after await — by then the
+        // user may have moved their mouse away and the panel may have collapsed.
+        let panelWasOpen = NotchPanelManager.shared.isExpanded
+        let capturedSession = SessionStore.shared.effectiveSession
         processingTask = Task {
             guard let audioURL else {
                 DiagLog.shared.write("VOICE: No audio URL, resetting")
@@ -201,11 +206,9 @@ final class VoiceOrchestrator {
                     return
                 }
 
-                // Route: if the notch panel is open, try to inject into the active Claude tty.
-                let panelOpen = NotchPanelManager.shared.isExpanded
-                let activeSession = SessionStore.shared.effectiveSession
-
-                if panelOpen, let session = activeSession {
+                // Route using state captured at Fn-UP time (before the async transcription gap).
+                DiagLog.shared.write("VOICE: routing — panelWasOpen=\(panelWasOpen), hasSession=\(capturedSession != nil)")
+                if panelWasOpen, let session = capturedSession {
                     // Warn if Claude is currently processing — the message will queue.
                     let isClaudeBusy = session.task == .working || session.task == .compacting
                     // Show transcript bubble immediately (optimistic).

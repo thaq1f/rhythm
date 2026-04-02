@@ -101,16 +101,16 @@ final class NotchPanelManager {
 
     func handleVoiceStateChange(_ state: VoiceState) {
         switch state {
-        case .recording:
-            // Don't auto-expand for recording — compact indicator in header is enough.
-            // But DO cancel any pending collapse so the panel stays stable.
-            break
-        case .agentThinking, .agentResponse:
+        case .recording, .agentRecording:
+            // Auto-expand when Fn is pressed so the panel is visible for the
+            // entire voice flow (recording → transcribing → sending → done).
+            expand()
+        case .processing, .agentThinking, .agentResponse:
+            // Keep the panel open during transcription / tty injection.
             expand()
         case .idle, .success:
-            // Only auto-collapse if we auto-expanded for agent response
-            if !isPinned { /* let normal hover handle collapse */ }
-        default:
+            // Return to normal hover-driven state — panel will collapse when
+            // the mouse leaves the area.
             break
         }
     }
