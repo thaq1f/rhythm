@@ -90,6 +90,8 @@ while (read(STDIN, my $c, 1)) {
     /// Scans all processes for a running `claude` instance with a controlling tty.
     /// Used as a last resort when the session has no stored tty and the pid is dead.
     /// Returns the first matching tty, preferring processes in `cwd` if provided.
+    /// Scans all processes for an interactive `claude` instance with a controlling tty.
+    /// Avoids lsof (can hang) — uses only `ps` which is safe and fast.
     static func findClaudeTTY(preferringCWD cwd: String? = nil) -> String? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -101,39 +103,21 @@ while (read(STDIN, my $c, 1)) {
         proc.waitUntilExit()
         let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 
-        var candidates: [(tty: String, pid: String)] = []
+        var first: String?
         for line in output.split(separator: "\n") {
             let parts = line.split(separator: " ", maxSplits: 2)
             guard parts.count >= 3 else { continue }
-            let pid = String(parts[0])
             let tty = String(parts[1])
             let cmd = String(parts[2])
             guard tty != "??", tty != "?", cmd.contains("claude") else { continue }
-            let isNonInteractive = cmd.contains("--print") || cmd.contains(" -p ") || cmd.contains(" -p\t")
+            let isNonInteractive = cmd.contains("--print") || cmd.contains(" -p ")
             guard !isNonInteractive else { continue }
-            candidates.append((tty: "/dev/" + tty, pid: pid))
+            // Prefer a process whose command line mentions the preferred cwd
+            let ttyPath = "/dev/" + tty
+            if let cwd, cmd.contains(cwd) { return ttyPath }
+            if first == nil { first = ttyPath }
         }
-
-        guard !candidates.isEmpty else { return nil }
-
-        // If a preferred cwd is given, try to match via lsof
-        if let cwd, !candidates.isEmpty {
-            for c in candidates {
-                let lsof = Process()
-                lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-                lsof.arguments = ["-p", c.pid, "-a", "-d", "cwd", "-Fn"]
-                let lout = Pipe()
-                lsof.standardOutput = lout
-                lsof.standardError = Pipe()
-                if (try? lsof.run()) != nil {
-                    lsof.waitUntilExit()
-                    let loutput = String(data: lout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                    if loutput.contains(cwd) { return c.tty }
-                }
-            }
-        }
-
-        return candidates.first?.tty
+        return first
     }
 
 }

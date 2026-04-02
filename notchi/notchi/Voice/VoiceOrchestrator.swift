@@ -220,7 +220,7 @@ final class VoiceOrchestrator {
                     if let stored = session.tty {
                         resolvedTTY = stored
                         DiagLog.shared.write("VOICE: Using stored tty \(stored)")
-                    } else if let pid = session.pid,
+                    } else if let pid = session.pid, pid > 0,
                               let found = await Task.detached(priority: .userInitiated) { TTYInputService.lookupTTY(for: pid) }.value {
                         resolvedTTY = found
                         DiagLog.shared.write("VOICE: ps lookup found tty \(found) for pid \(pid)")

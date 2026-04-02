@@ -165,6 +165,10 @@ struct ExpandedPanelView: View {
                 if hasActivity {
                     Divider().background(Color.white.opacity(0.08))
                     activitySection
+                } else if effectiveSession != nil && !isActivityCollapsed {
+                    // Session exists but no recent activity — show idle hint, not "New Session"
+                    Spacer()
+                    sessionIdleState
                 } else if !isActivityCollapsed {
                     Spacer()
                     emptyState
@@ -283,6 +287,20 @@ struct ExpandedPanelView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    private var sessionIdleState: some View {
+        VStack(spacing: 8) {
+            if let session = effectiveSession {
+                Text("\(session.projectName) #\(session.sessionNumber)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(TerminalColors.primaryText)
+                Text("Idle · Hold Fn to speak")
+                    .font(.system(size: 11))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyState: some View {
