@@ -16,16 +16,17 @@ done
 # Resolve the tty of the parent claude process
 CLAUDE_TTY_RAW=$(ps -p "$PPID" -o tty= 2>/dev/null | tr -d ' ')
 if [ "$CLAUDE_TTY_RAW" = "??" ] || [ -z "$CLAUDE_TTY_RAW" ]; then
-    CLAUDE_TTY=""
+    export NOTCHI_TTY=""
 else
-    CLAUDE_TTY="/dev/$CLAUDE_TTY_RAW"
+    export NOTCHI_TTY="/dev/$CLAUDE_TTY_RAW"
 fi
 
 export NOTCHI_INTERACTIVE="$IS_INTERACTIVE"
-export NOTCHI_TTY="$CLAUDE_TTY"
 export NOTCHI_PID="$PPID"
+export NOTCHI_SOCK="$SOCKET_PATH"
 
-/usr/bin/python3 - << 'PYEOF'
+# Store the Python script in a variable so stdin stays free for Claude Code's JSON.
+read -r -d '' PYSCRIPT << 'PYEOF'
 import json, os, socket, sys
 
 try:
@@ -85,9 +86,11 @@ if tool_input:
 
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(os.environ.get('NOTCHI_SOCK', '/tmp/notchi.sock'))
+    sock.connect(os.environ['NOTCHI_SOCK'])
     sock.sendall(json.dumps(output).encode())
     sock.close()
 except Exception:
     pass
 PYEOF
+
+/usr/bin/python3 -c "$PYSCRIPT"
