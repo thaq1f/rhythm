@@ -2,11 +2,9 @@
 # Notchi Hook - forwards Claude Code events to Notchi app via Unix socket
 
 SOCKET_PATH="/tmp/notchi.sock"
-
-# Exit silently if socket doesn't exist (app not running)
 [ -S "$SOCKET_PATH" ] || exit 0
 
-# Detect non-interactive (claude -p / --print) sessions
+# Detect non-interactive sessions (claude -p / --print)
 IS_INTERACTIVE=true
 for CHECK_PID in $PPID $(ps -o ppid= -p $PPID 2>/dev/null | tr -d ' '); do
     if ps -o args= -p "$CHECK_PID" 2>/dev/null | grep -qE '(^| )(-p|--print)( |$)'; then
@@ -14,57 +12,64 @@ for CHECK_PID in $PPID $(ps -o ppid= -p $PPID 2>/dev/null | tr -d ' '); do
         break
     fi
 done
-export NOTCHI_INTERACTIVE=$IS_INTERACTIVE
 
-# Capture the tty and PID of the Claude Code process.
-# The hook shares the same controlling terminal as Claude, so `tty` gives the right device.
-_TTY=$(tty 2>/dev/null)
-[ "$_TTY" = "not a tty" ] && _TTY=""
-export NOTCHI_TTY=$_TTY
-export NOTCHI_PID=$PPID
+# Resolve the tty of the parent claude process
+CLAUDE_TTY_RAW=$(ps -p "$PPID" -o tty= 2>/dev/null | tr -d ' ')
+if [ "$CLAUDE_TTY_RAW" = "??" ] || [ -z "$CLAUDE_TTY_RAW" ]; then
+    CLAUDE_TTY=""
+else
+    CLAUDE_TTY="/dev/$CLAUDE_TTY_RAW"
+fi
 
-# Parse input and send to socket using Python
-/usr/bin/python3 -c "
-import json
-import os
-import socket
-import sys
+export NOTCHI_INTERACTIVE="$IS_INTERACTIVE"
+export NOTCHI_TTY="$CLAUDE_TTY"
+export NOTCHI_PID="$PPID"
+
+/usr/bin/python3 - << 'PYEOF'
+import json, os, socket, sys
 
 try:
     input_data = json.load(sys.stdin)
-except:
+except Exception:
     sys.exit(0)
 
-hook_event = input_data.get('hook_event_name', '')
+hook_event = os.environ.get('CLAUDE_HOOK_EVENT', os.environ.get('HOOK_EVENT_NAME', ''))
+if not hook_event:
+    hook_event = input_data.get('hook_event_name', input_data.get('event', ''))
 
 status_map = {
-    'UserPromptSubmit': 'processing',
-    'PreCompact': 'compacting',
-    'SessionStart': 'waiting_for_input',
-    'SessionEnd': 'ended',
-    'PreToolUse': 'running_tool',
-    'PostToolUse': 'processing',
-    'PermissionRequest': 'waiting_for_input',
-    'Stop': 'waiting_for_input',
-    'SubagentStop': 'waiting_for_input'
+    'SessionStart':      'session_started',
+    'UserPromptSubmit':  'waiting_for_input',
+    'PreToolUse':        'tool_starting',
+    'PostToolUse':       'tool_complete',
+    'Stop':              'completed',
+    'SubagentStop':      'waiting_for_input',
 }
+
+tty = os.environ.get('NOTCHI_TTY', '') or None
+pid_str = os.environ.get('NOTCHI_PID', '')
+pid = int(pid_str) if pid_str.isdigit() else None
 
 output = {
-    'session_id': input_data.get('session_id', ''),
-    'cwd': input_data.get('cwd', ''),
-    'event': hook_event,
-    'status': input_data.get('status', status_map.get(hook_event, 'unknown')),
-    'pid': int(os.environ.get('NOTCHI_PID', '0')) or None,
-    'tty': os.environ.get('NOTCHI_TTY', '') or None,
-    'interactive': os.environ.get('NOTCHI_INTERACTIVE', 'true') == 'true',
-    'permission_mode': input_data.get('permission_mode', 'default')
+    'session_id':      input_data.get('session_id', ''),
+    'cwd':             input_data.get('cwd', ''),
+    'event':           hook_event,
+    'status':          input_data.get('status', status_map.get(hook_event, 'unknown')),
+    'pid':             pid,
+    'tty':             tty,
+    'interactive':     os.environ.get('NOTCHI_INTERACTIVE', 'true') == 'true',
+    'permission_mode': input_data.get('permission_mode', 'default'),
 }
 
-# Pass user prompt directly for UserPromptSubmit
 if hook_event == 'UserPromptSubmit':
     prompt = input_data.get('prompt', '')
     if prompt:
         output['user_prompt'] = prompt
+
+if hook_event in ('Stop', 'SubagentStop'):
+    result = input_data.get('result', '')
+    if result:
+        output['result'] = result
 
 tool = input_data.get('tool_name', '')
 if tool:
@@ -80,9 +85,9 @@ if tool_input:
 
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect('$SOCKET_PATH')
+    sock.connect(os.environ.get('NOTCHI_SOCK', '/tmp/notchi.sock'))
     sock.sendall(json.dumps(output).encode())
     sock.close()
-except:
+except Exception:
     pass
-"
+PYEOF

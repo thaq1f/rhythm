@@ -11,6 +11,7 @@ struct HookEvent: Decodable, Sendable {
     let toolInput: [String: AnyCodable]?
     let toolUseId: String?
     let userPrompt: String?
+    let result: String?      // assistant response text from Stop hook
     let permissionMode: String?
     let interactive: Bool?
 
@@ -20,6 +21,7 @@ struct HookEvent: Decodable, Sendable {
         case toolInput = "tool_input"
         case toolUseId = "tool_use_id"
         case userPrompt = "user_prompt"
+        case result
         case permissionMode = "permission_mode"
         case interactive
     }

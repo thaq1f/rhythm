@@ -51,6 +51,8 @@ final class SessionStore {
     }
 
     func process(_ event: HookEvent) -> SessionData {
+        let _tty = event.tty ?? "nil"; let _pid = event.pid.map(String.init) ?? "nil"
+        DiagLog.shared.write("SESSION: Hook \(event.event) for \(event.sessionId.prefix(8))… tty=\(_tty) pid=\(_pid)")
         let isInteractive = event.interactive ?? true
         let session = getOrCreateSession(sessionId: event.sessionId, cwd: event.cwd, isInteractive: isInteractive)
         session.updatePid(event.pid)
@@ -108,6 +110,10 @@ final class SessionStore {
 
         case "Stop", "SubagentStop":
             session.clearPendingQuestions()
+            if let result = event.result, !result.isEmpty {
+                let msg = AssistantMessage(id: event.sessionId + "-stop", text: result, timestamp: Date())
+                session.recordAssistantMessages([msg])
+            }
             session.updateTask(.idle)
 
         case "SessionEnd":
