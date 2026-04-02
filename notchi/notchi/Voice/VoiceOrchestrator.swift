@@ -156,7 +156,7 @@ final class VoiceOrchestrator {
         }
         isRecording = false
 
-        presentationState.currentState = .processing(hint: "transcribing")
+        presentationState.currentState = .processing(hint: "transcribing…")
 
         let audioURL = capture.stopRecording()
         processRecording(audioURL: audioURL)
@@ -171,7 +171,17 @@ final class VoiceOrchestrator {
             }
 
             do {
+                // Update hint live: "loading model…" while Parakeet warms up, then "transcribing…"
+                let hintTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    while !Task.isCancelled {
+                        let isLoading = await TranscriptionService.shared.isModelLoading
+                        self.presentationState.currentState = .processing(hint: isLoading ? "loading model…" : "transcribing…")
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                }
                 let transcript = try await TranscriptionService.shared.transcribe(audioURL)
+                hintTask.cancel()
 
                 // Clean up temp audio file
                 try? FileManager.default.removeItem(at: audioURL)

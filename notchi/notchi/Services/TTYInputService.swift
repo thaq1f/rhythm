@@ -25,39 +25,49 @@ while (read(STDIN, my $c, 1)) {
     /// Injects `text` followed by a newline into `ttyPath`.
     /// Runs off the main thread. Returns true on success.
     func injectText(_ text: String, into ttyPath: String) async -> Bool {
-        await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-            process.arguments = ["-e", TTYInputService.perlScript, "--", ttyPath]
+        // Race the injection against a 6-second timeout so a stalled IOCTL never hangs the UI.
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask(priority: .userInitiated) {
+                await Task.detached(priority: .userInitiated) {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+                    process.arguments = ["-e", TTYInputService.perlScript, "--", ttyPath]
 
-            let stdinPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardInput = stdinPipe
-            process.standardError = stderrPipe
+                    let stdinPipe = Pipe()
+                    let stderrPipe = Pipe()
+                    process.standardInput = stdinPipe
+                    process.standardError = stderrPipe
 
-            do {
-                try process.run()
-            } catch {
-                logger.error("Failed to launch perl: \(error)")
+                    do { try process.run() } catch {
+                        logger.error("Failed to launch perl: \(error)")
+                        return false
+                    }
+
+                    let inputBytes = (text + "\n").data(using: .utf8) ?? Data()
+                    stdinPipe.fileHandleForWriting.write(inputBytes)
+                    stdinPipe.fileHandleForWriting.closeFile()
+                    process.waitUntilExit()
+
+                    guard process.terminationStatus == 0 else {
+                        let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                        let errMsg = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        logger.error("TTY injection failed (exit \(process.terminationStatus)): \(errMsg)")
+                        return false
+                    }
+                    logger.info("Injected \(text.count) chars into \(ttyPath)")
+                    return true
+                }.value
+            }
+            group.addTask {
+                // Timeout sentinel — kill the process and return failure after 6s.
+                try? await Task.sleep(for: .seconds(6))
+                DiagLog.shared.write("VOICE: TTY injection timed out after 6s")
                 return false
             }
-
-            let inputBytes = (text + "\n").data(using: .utf8) ?? Data()
-            stdinPipe.fileHandleForWriting.write(inputBytes)
-            stdinPipe.fileHandleForWriting.closeFile()
-
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0 else {
-                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                let errMsg = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                logger.error("TTY injection failed (exit \(process.terminationStatus)): \(errMsg)")
-                return false
-            }
-
-            logger.info("Injected \(text.count) chars into \(ttyPath)")
-            return true
-        }.value
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
     }
 
     /// Looks up the tty path for a running process via `ps`.

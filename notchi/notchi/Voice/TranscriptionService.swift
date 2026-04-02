@@ -15,6 +15,9 @@ actor TranscriptionService {
     enum State { case idle, loading, ready, failed(String) }
     private(set) var state: State = .idle
 
+    /// True while the model is downloading or initializing.
+    var isModelLoading: Bool { if case .loading = state { return true }; return false }
+
     /// Download model (~600MB first time) and load onto ANE. Safe to call multiple times.
     func warmUp() async {
         guard case .idle = state else { return }
