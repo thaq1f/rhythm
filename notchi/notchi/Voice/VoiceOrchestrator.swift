@@ -269,11 +269,9 @@ final class VoiceOrchestrator {
                         if let target = conductorApp {
                             target.activate(options: .activateIgnoringOtherApps)
                             try? await Task.sleep(for: .milliseconds(200))
-                            let focused = AccessibilityService.shared.focusConductorInput(in: target)
-                            if focused {
-                                try? await Task.sleep(for: .milliseconds(100))
-                            }
-                            DiagLog.shared.write("VOICE: Sending to Conductor (focused=\(focused))")
+                            // Don't focus AX elements — "Terminal input" is the terminal
+                            // panel, not the chat input. Just activate and paste.
+                            DiagLog.shared.write("VOICE: Sending to Conductor")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {
                             DiagLog.shared.write("VOICE: No tty, no Conductor — showing hint")

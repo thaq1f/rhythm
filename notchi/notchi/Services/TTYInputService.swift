@@ -133,8 +133,9 @@ while (read(STDIN, my $c, 1)) {
             "net.kovidgoyal.kitty",
             "com.github.alacritty",
             "co.zeit.hyper",
+            "com.mitchellh.ghostty",
         ]
-        let knownNames: Set<String> = ["terminal", "iterm2", "iterm", "warp", "kitty", "alacritty", "hyper"]
+        let knownNames: Set<String> = ["terminal", "iterm2", "iterm", "warp", "kitty", "alacritty", "hyper", "ghostty"]
 
         // Walk up the process tree: claude → shell → terminal
         var current = pid
