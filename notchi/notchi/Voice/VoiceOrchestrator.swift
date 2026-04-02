@@ -252,16 +252,28 @@ final class VoiceOrchestrator {
                             $0.bundleIdentifier?.lowercased().contains("conductor") == true
                         }
                         if let target = conductorApp {
-                            // Navigate Conductor to the correct workspace before pasting.
-                            // Uses Accessibility tree traversal to click the matching workspace tab.
+                            // Activate Conductor and focus its terminal input directly.
+                            // We can't match workspace names (Conductor uses display names
+                            // that differ from directory names), so we focus the "Terminal input"
+                            // text area of whatever workspace is currently open.
                             target.activate(options: .activateIgnoringOtherApps)
                             try? await Task.sleep(for: .milliseconds(200))
-                            let workspaceName = session.projectName
-                            let navigated = AccessibilityService.shared.navigateToWorkspace(workspaceName, in: target)
-                            if navigated {
-                                try? await Task.sleep(for: .milliseconds(400))
+
+                            // Verify the active workspace matches via lastHookSessionId.
+                            let lastHook = SessionStore.shared.lastHookSessionId
+                            if let lastHook, lastHook != session.id {
+                                DiagLog.shared.write("VOICE: Conductor workspace mismatch — switch to \(session.projectName)")
+                                presentationState.currentState = .processing(hint: "switch to \(session.projectName) in Conductor")
+                                try? await Task.sleep(for: .seconds(2.5))
+                                presentationState.reset()
+                                return
                             }
-                            DiagLog.shared.write("VOICE: Pasting to Conductor workspace '\(workspaceName)' (navigated=\(navigated))")
+
+                            let focused = AccessibilityService.shared.focusConductorInput(in: target)
+                            if focused {
+                                try? await Task.sleep(for: .milliseconds(100))
+                            }
+                            DiagLog.shared.write("VOICE: Pasting to Conductor (focused=\(focused))")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {
                             DiagLog.shared.write("VOICE: No tty, no Claude host found — showing hint")

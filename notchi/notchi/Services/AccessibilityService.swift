@@ -154,6 +154,47 @@ final class AccessibilityService {
         for child in children { dumpMatchingElements(text: text, in: child, depth: depth + 1) }
     }
 
+    /// Finds the "Terminal input" text area in Conductor and focuses it.
+    /// Returns true if focused successfully.
+    func focusConductorInput(in app: NSRunningApplication) -> Bool {
+        guard isGranted else { return false }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        guard let textArea = findElementByDescription("Terminal input", role: "AXTextArea", in: appElement, depth: 0) else {
+            DiagLog.shared.write("ACCESSIBILITY: Could not find Terminal input in Conductor")
+            return false
+        }
+        // Focus the text area so keyboard events and paste go to it.
+        let result = AXUIElementSetAttributeValue(textArea, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        DiagLog.shared.write("ACCESSIBILITY: Focused Terminal input (result=\(result == .success))")
+        return result == .success
+    }
+
+    private func findElementByDescription(_ desc: String, role: String, in element: AXUIElement, depth: Int) -> AXUIElement? {
+        guard depth < 10 else { return nil }
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let elemRole = (roleRef as? String) ?? ""
+        if elemRole == "AXMenuBar" { return nil }
+
+        var descRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXDescriptionAttribute as CFString, &descRef)
+        let elemDesc = (descRef as? String) ?? ""
+
+        if elemRole == role && elemDesc.localizedCaseInsensitiveContains(desc) {
+            return element
+        }
+
+        var childrenRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+        guard let children = childrenRef as? [AXUIElement] else { return nil }
+        for child in children {
+            if let found = findElementByDescription(desc, role: role, in: child, depth: depth + 1) {
+                return found
+            }
+        }
+        return nil
+    }
+
     /// Copies text and sends Cmd+V followed by Return to a specific target app.
     /// Pass targetApp explicitly — never relies on "frontmost" to avoid routing to
     /// unrelated apps (Telegram, Safari, etc.) that happened to be focused before
