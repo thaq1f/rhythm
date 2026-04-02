@@ -170,18 +170,19 @@ final class VoiceOrchestrator {
                 return
             }
 
-            do {
-                // Update hint live: "loading model…" while Parakeet warms up, then "transcribing…"
-                let hintTask = Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    while !Task.isCancelled {
-                        let isLoading = await TranscriptionService.shared.isModelLoading
-                        self.presentationState.currentState = .processing(hint: isLoading ? "loading model…" : "transcribing…")
-                        try? await Task.sleep(for: .milliseconds(200))
-                    }
+            // Update hint live — declared outside do/catch so it can be cancelled in either path.
+            var hintTask: Task<Void, Never>? = Task { @MainActor [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    let isLoading = await TranscriptionService.shared.isModelLoading
+                    self.presentationState.currentState = .processing(hint: isLoading ? "loading model…" : "transcribing…")
+                    try? await Task.sleep(for: .milliseconds(200))
                 }
+            }
+            do {
                 let transcript = try await TranscriptionService.shared.transcribe(audioURL)
-                hintTask.cancel()
+                hintTask?.cancel()
+                hintTask = nil
 
                 // Clean up temp audio file
                 try? FileManager.default.removeItem(at: audioURL)
@@ -197,9 +198,11 @@ final class VoiceOrchestrator {
                 let activeSession = SessionStore.shared.effectiveSession
 
                 if panelOpen, let session = activeSession {
+                    // Warn if Claude is currently processing — the message will queue.
+                    let isClaudeBusy = session.task == .working || session.task == .compacting
                     // Show transcript bubble immediately (optimistic).
                     SessionStore.shared.recordVoicePrompt(transcript, for: session.id)
-                    presentationState.currentState = .processing(hint: "sending…")
+                    presentationState.currentState = .processing(hint: isClaudeBusy ? "queuing…" : "sending…")
 
                     // Resolve tty — three escalating fallbacks:
                     // 1. Stored tty from hook events
@@ -249,9 +252,11 @@ final class VoiceOrchestrator {
                 try? await Task.sleep(for: .seconds(0.6))
                 presentationState.reset()
             } catch {
+                hintTask?.cancel()     // stop the loading/transcribing loop immediately
+                hintTask = nil
                 logger.error("Transcription failed: \(error)")
                 DiagLog.shared.write("VOICE: Transcription error: \(error.localizedDescription)")
-                presentationState.currentState = .processing(hint: "Transcription failed")
+                presentationState.currentState = .processing(hint: "transcription failed")
                 try? await Task.sleep(for: .seconds(1.5))
                 presentationState.reset()
             }
