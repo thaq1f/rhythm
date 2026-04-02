@@ -253,27 +253,13 @@ final class VoiceOrchestrator {
                         }
                         if let target = conductorApp {
                             // Activate Conductor and focus its terminal input directly.
-                            // We can't match workspace names (Conductor uses display names
-                            // that differ from directory names), so we focus the "Terminal input"
-                            // text area of whatever workspace is currently open.
                             target.activate(options: .activateIgnoringOtherApps)
                             try? await Task.sleep(for: .milliseconds(200))
-
-                            // Verify the active workspace matches via lastHookSessionId.
-                            let lastHook = SessionStore.shared.lastHookSessionId
-                            if let lastHook, lastHook != session.id {
-                                DiagLog.shared.write("VOICE: Conductor workspace mismatch — switch to \(session.projectName)")
-                                presentationState.currentState = .processing(hint: "switch to \(session.projectName) in Conductor")
-                                try? await Task.sleep(for: .seconds(2.5))
-                                presentationState.reset()
-                                return
-                            }
-
                             let focused = AccessibilityService.shared.focusConductorInput(in: target)
                             if focused {
                                 try? await Task.sleep(for: .milliseconds(100))
                             }
-                            DiagLog.shared.write("VOICE: Pasting to Conductor (focused=\(focused))")
+                            DiagLog.shared.write("VOICE: Sending to Conductor (focused=\(focused))")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {
                             DiagLog.shared.write("VOICE: No tty, no Claude host found — showing hint")
