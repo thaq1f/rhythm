@@ -252,6 +252,15 @@ final class VoiceOrchestrator {
                             $0.bundleIdentifier?.lowercased().contains("conductor") == true
                         }
                         if let target = conductorApp {
+                            // Check that Conductor's active workspace matches the notch session.
+                            let lastHook = SessionStore.shared.lastHookSessionId
+                            if let lastHook, lastHook != session.id {
+                                DiagLog.shared.write("VOICE: Conductor workspace mismatch — active=\(lastHook.prefix(8))… notch=\(session.id.prefix(8))…")
+                                presentationState.currentState = .processing(hint: "switch to \(session.projectName) in Conductor")
+                                try? await Task.sleep(for: .seconds(2.5))
+                                presentationState.reset()
+                                return
+                            }
                             DiagLog.shared.write("VOICE: No tty — pasting+Return to Conductor (\(target.localizedName ?? "?"))")
                             AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
                         } else {

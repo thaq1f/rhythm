@@ -10,6 +10,8 @@ final class SessionStore {
 
     private(set) var sessions: [String: SessionData] = [:]
     private(set) var selectedSessionId: String?
+    /// The session that most recently received a hook event (likely the active workspace in Conductor).
+    private(set) var lastHookSessionId: String?
     private var nextSessionNumberByProject: [String: Int] = [:]
 
     private init() {}
@@ -53,6 +55,15 @@ final class SessionStore {
     func process(_ event: HookEvent) -> SessionData {
         let _tty = event.tty ?? "nil"; let _pid = event.pid.map(String.init) ?? "nil"
         DiagLog.shared.write("SESSION: Hook \(event.event) for \(event.sessionId.prefix(8))… tty=\(_tty) pid=\(_pid)")
+
+        // Ignore hooks from non-project paths (e.g. /tmp from manual tests)
+        let cwd = event.cwd
+        if cwd == "/tmp" || cwd == "/" || cwd.isEmpty {
+            DiagLog.shared.write("SESSION: Ignoring hook from non-project cwd: \(cwd)")
+            return SessionData(sessionId: event.sessionId, cwd: cwd, sessionNumber: 0, isInteractive: true, existingXPositions: [])
+        }
+
+        lastHookSessionId = event.sessionId
         let isInteractive = event.interactive ?? true
         let session = getOrCreateSession(sessionId: event.sessionId, cwd: event.cwd, isInteractive: isInteractive)
         session.updatePid(event.pid)
