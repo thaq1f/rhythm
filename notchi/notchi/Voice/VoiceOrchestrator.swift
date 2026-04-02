@@ -19,6 +19,7 @@ final class VoiceOrchestrator {
     private var cancellables = Set<AnyCancellable>()
     private var isRecording = false
     private var permissionGranted: Bool?  // nil = unchecked
+    private var processingTask: Task<Void, Never>?
 
     private init() {
         wireKeyListener()
@@ -76,6 +77,12 @@ final class VoiceOrchestrator {
     // MARK: - Record Start (NEVER blocks main thread)
 
     private func handleRecordStart() {
+        // Cancel any previous transcription/injection so we don't accumulate stuck tasks.
+        processingTask?.cancel()
+        processingTask = nil
+        if presentationState.currentState != .idle && !isRecording {
+            presentationState.reset()
+        }
         DiagLog.shared.write("VOICE: handleRecordStart called (isRecording=\(isRecording), captureRecording=\(capture.isRecording), permission=\(permissionGranted ?? false))")
         // Safety: if a previous recording got stuck, force-reset before starting
         if isRecording && !capture.isRecording {
@@ -163,7 +170,8 @@ final class VoiceOrchestrator {
     }
 
     private func processRecording(audioURL: URL?) {
-        Task {
+        processingTask?.cancel()
+        processingTask = Task {
             guard let audioURL else {
                 DiagLog.shared.write("VOICE: No audio URL, resetting")
                 presentationState.reset()
