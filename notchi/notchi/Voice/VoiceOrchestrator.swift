@@ -26,6 +26,10 @@ final class VoiceOrchestrator {
     private init() {
         wireKeyListener()
         observeAudioLevel()
+        // Auto-stop recording when max duration is reached.
+        NotificationCenter.default.addObserver(forName: .voiceMaxDurationReached, object: nil, queue: .main) { [weak self] _ in
+            self?.handleRecordStop()
+        }
     }
 
     func start() {
