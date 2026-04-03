@@ -279,14 +279,10 @@ final class VoiceOrchestrator {
                         }
                     }
                 } else {
-                    // Panel was closed — use the app that was active at Fn-DOWN time.
-                    if let app = originApp {
-                        DiagLog.shared.write("VOICE: Panel closed — pasting to \(app.localizedName ?? "?")")
-                        AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: app)
-                    } else {
-                        DiagLog.shared.write("VOICE: Pasting \(transcript.count) chars via Cmd+V")
-                        AccessibilityService.shared.pasteText(transcript)
-                    }
+                    // Panel was closed — general dictation mode. Paste only, no Return.
+                    // Return is only sent when routing to a Claude session via the notch.
+                    DiagLog.shared.write("VOICE: Panel closed — pasting \(transcript.count) chars (no Return)")
+                    AccessibilityService.shared.pasteText(transcript)
                 }
 
                 presentationState.currentState = .success
