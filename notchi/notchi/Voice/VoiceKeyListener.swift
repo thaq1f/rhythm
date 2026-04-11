@@ -28,7 +28,7 @@ final class VoiceKeyListener {
     nonisolated(unsafe) private var tapConsumesEvents = false
 
     private var holdTimeoutTask: Task<Void, Never>?
-    private let maxHoldDuration: TimeInterval = 30
+    private let maxHoldDuration: TimeInterval = 300
 
     private init() {}
 
