@@ -250,6 +250,7 @@ final class SessionData: Identifiable {
         let lastUserPrompt: String?
         let pid: Int?
         let sessionStartTime: Date
+        let task: String?
     }
 
     func toPersisted() -> Persisted {
@@ -261,7 +262,8 @@ final class SessionData: Identifiable {
             lastActivity: lastActivity,
             lastUserPrompt: lastUserPrompt,
             pid: pid,
-            sessionStartTime: sessionStartTime
+            sessionStartTime: sessionStartTime,
+            task: task.rawValue
         )
     }
 
@@ -276,6 +278,6 @@ final class SessionData: Identifiable {
         self.pid = persisted.pid
         self.lastUserPrompt = persisted.lastUserPrompt
         self.lastActivity = persisted.lastActivity
-        self.task = .sleeping
+        self.task = NotchiTask(rawValue: persisted.task ?? "") ?? .sleeping
     }
 }
