@@ -184,7 +184,7 @@ final class SocketServerTests: XCTestCase {
     }
 
     private func uniqueSocketPath() -> String {
-        "/tmp/notchi-tests-\(UUID().uuidString).sock"
+        "/tmp/rhythm-tests-\(UUID().uuidString).sock"
     }
 
     private func makeEventPayload(sessionId: String) throws -> Data {

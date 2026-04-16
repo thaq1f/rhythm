@@ -6,7 +6,7 @@ enum NotchConstants {
 }
 
 extension Notification.Name {
-    static let notchiShouldCollapse = Notification.Name("notchiShouldCollapse")
+    static let rhythmShouldCollapse = Notification.Name("rhythmShouldCollapse")
 }
 
 private let cornerRadiusInsets = (
@@ -15,7 +15,7 @@ private let cornerRadiusInsets = (
 )
 
 struct NotchContentView: View {
-    var stateMachine: NotchiStateMachine = .shared
+    var stateMachine: RhythmStateMachine = .shared
     var panelManager: NotchPanelManager = .shared
     var usageService: ClaudeUsageService = .shared
     var agentSessionManager: AgentSessionManager = .shared
@@ -140,7 +140,7 @@ struct NotchContentView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(panelAnimation, value: isExpanded)
-        .onReceive(NotificationCenter.default.publisher(for: .notchiShouldCollapse)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .rhythmShouldCollapse)) { _ in
             panelManager.collapse()
         }
         .onChange(of: isExpanded) { _, expanded in
@@ -245,7 +245,7 @@ struct NotchContentView: View {
         )
     }
 
-    // MARK: - Expanded Content (original Notchi layout + voice input)
+    // MARK: - Expanded Content (original Rhythm layout + voice input)
 
     @ViewBuilder
     private var expandedContent: some View {

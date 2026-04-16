@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SessionSpriteView: View {
-    let state: NotchiState
+    let state: RhythmState
     let isSelected: Bool
 
     private var bobAmplitude: CGFloat {

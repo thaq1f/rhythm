@@ -1,7 +1,7 @@
 import AppKit
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "Accessibility")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "Accessibility")
 
 @MainActor
 @Observable

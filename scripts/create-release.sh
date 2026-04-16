@@ -2,24 +2,24 @@
 set -euo pipefail
 
 # =============================================================================
-# Notchi Release Script
+# Rhythm Release Script
 # Usage: ./scripts/create-release.sh <version>
 # Example: ./scripts/create-release.sh 1.1.0
 # =============================================================================
 
 # --- Configuration ---
 TEAM_ID="SXT98GH5HN"
-BUNDLE_ID="com.ruban.notchi"
+BUNDLE_ID="com.ruban.rhythm"
 SCHEME="notchi"
 PROJECT_PATH="notchi/notchi.xcodeproj"
 APPCAST_OUTPUT="docs/appcast.xml"
-APP_NAME="Notchi"
+APP_NAME="Rhythm"
 WEBSITE_APPCAST_OUTPUT="website/public/appcast.xml"
 SIGNED_RELEASE_NOTES_DIR="website/release-notes-signed"
 
 # TODO: Set your notarytool keychain profile name.
-# Create one with: xcrun notarytool store-credentials "notchi-notarize" --apple-id "you@example.com" --team-id "SXT98GH5HN"
-NOTARYTOOL_PROFILE="notchi-notarize"
+# Create one with: xcrun notarytool store-credentials "rhythm-notarize" --apple-id "you@example.com" --team-id "SXT98GH5HN"
+NOTARYTOOL_PROFILE="rhythm-notarize"
 
 # Sparkle tools directory — override with SPARKLE_BIN_DIR env var.
 # Falls back to searching DerivedData for the Sparkle build artifacts.
@@ -204,7 +204,7 @@ echo "Exported ${APP_PATH}"
 # --- Step 4: Notarize and staple ---
 step "Step 3/6: Notarize and staple"
 
-NOTARIZE_ZIP="${BUILD_DIR}/notchi-submit.zip"
+NOTARIZE_ZIP="${BUILD_DIR}/rhythm-submit.zip"
 echo "Creating zip for notarization..."
 ditto -c -k --keepParent "$APP_PATH" "$NOTARIZE_ZIP"
 
@@ -294,8 +294,8 @@ cp "$APPCAST_OUTPUT" "$APPCAST_STAGING/" 2>/dev/null || true
 
 "$GENERATE_APPCAST" \
     --ed-key-file "$SPARKLE_KEY_FILE" \
-    --download-url-prefix "https://github.com/sk-ruban/notchi/releases/download/v${VERSION}/" \
-    --release-notes-url-prefix "https://updates.notchi.app/sparkle-notes/" \
+    --download-url-prefix "https://github.com/sk-ruban/rhythm/releases/download/v${VERSION}/" \
+    --release-notes-url-prefix "https://updates.rhythm.app/sparkle-notes/" \
     -o "$APPCAST_OUTPUT" \
     "$APPCAST_STAGING"
 

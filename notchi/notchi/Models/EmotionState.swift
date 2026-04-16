@@ -1,13 +1,13 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "EmotionState")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "EmotionState")
 
 @MainActor
 @Observable
 final class EmotionState {
-    private(set) var currentEmotion: NotchiEmotion = .neutral
-    private(set) var scores: [NotchiEmotion: Double] = [
+    private(set) var currentEmotion: RhythmEmotion = .neutral
+    private(set) var scores: [RhythmEmotion: Double] = [
         .happy: 0.0,
         .sad: 0.0
     ]
@@ -31,7 +31,7 @@ final class EmotionState {
     init() {}
 
     func recordEmotion(_ rawEmotion: String, intensity: Double, prompt: String) {
-        let emotion = NotchiEmotion(rawValue: rawEmotion)
+        let emotion = RhythmEmotion(rawValue: rawEmotion)
 
         if let emotion, emotion != .neutral {
             let dampened = intensity * Self.intensityDampen

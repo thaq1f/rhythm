@@ -1,8 +1,8 @@
 #!/bin/bash
-# Notchi Hook - forwards Claude Code events to Notchi app via Unix socket
+# Rhythm Hook - forwards Claude Code events to Rhythm app via Unix socket
 # Supports bidirectional communication for permission decisions via PreToolUse
 
-SOCKET_PATH="/tmp/notchi.sock"
+SOCKET_PATH="/tmp/rhythm.sock"
 [ -S "$SOCKET_PATH" ] || exit 0
 
 # Detect non-interactive sessions (claude -p / --print)
@@ -17,14 +17,14 @@ done
 # Resolve the tty of the parent claude process
 CLAUDE_TTY_RAW=$(ps -p "$PPID" -o tty= 2>/dev/null | tr -d ' ')
 if [ "$CLAUDE_TTY_RAW" = "??" ] || [ -z "$CLAUDE_TTY_RAW" ]; then
-    export NOTCHI_TTY=""
+    export RHYTHM_TTY=""
 else
-    export NOTCHI_TTY="/dev/$CLAUDE_TTY_RAW"
+    export RHYTHM_TTY="/dev/$CLAUDE_TTY_RAW"
 fi
 
-export NOTCHI_INTERACTIVE="$IS_INTERACTIVE"
-export NOTCHI_PID="$PPID"
-export NOTCHI_SOCK="$SOCKET_PATH"
+export RHYTHM_INTERACTIVE="$IS_INTERACTIVE"
+export RHYTHM_PID="$PPID"
+export RHYTHM_SOCK="$SOCKET_PATH"
 
 # Store the Python script in a variable so stdin stays free for Claude Code's JSON.
 read -r -d '' PYSCRIPT << 'PYEOF'
@@ -48,8 +48,8 @@ status_map = {
     'SubagentStop':      'waiting_for_input',
 }
 
-tty = os.environ.get('NOTCHI_TTY', '') or None
-pid_str = os.environ.get('NOTCHI_PID', '')
+tty = os.environ.get('RHYTHM_TTY', '') or None
+pid_str = os.environ.get('RHYTHM_PID', '')
 pid = int(pid_str) if pid_str.isdigit() else None
 
 tool = input_data.get('tool_name', '')
@@ -67,7 +67,7 @@ output = {
     'status':          input_data.get('status', status_map.get(hook_event, 'unknown')),
     'pid':             pid,
     'tty':             tty,
-    'interactive':     os.environ.get('NOTCHI_INTERACTIVE', 'true') == 'true',
+    'interactive':     os.environ.get('RHYTHM_INTERACTIVE', 'true') == 'true',
     'permission_mode': input_data.get('permission_mode', 'default'),
     'needs_response':  needs_response,
 }
@@ -97,7 +97,7 @@ RESPONSE_TIMEOUT = 120  # seconds — generous timeout for user interaction
 
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(os.environ['NOTCHI_SOCK'])
+    sock.connect(os.environ['RHYTHM_SOCK'])
     sock.sendall(json.dumps(output).encode())
     sock.shutdown(socket.SHUT_WR)  # signal: done sending, keep open for response
 

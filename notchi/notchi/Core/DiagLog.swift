@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 /// Diagnostic file logger for debugging.
-/// Writes to ~/Library/Logs/notchi-diag.log so events are always visible.
+/// Writes to ~/Library/Logs/rhythm-diag.log so events are always visible.
 @MainActor
 final class DiagLog {
     static let shared = DiagLog()
@@ -10,7 +10,7 @@ final class DiagLog {
     private let logPath: String
 
     private init() {
-        logPath = NSHomeDirectory() + "/Library/Logs/notchi-diag.log"
+        logPath = NSHomeDirectory() + "/Library/Logs/rhythm-diag.log"
         FileManager.default.createFile(atPath: logPath, contents: nil)
         fileHandle = FileHandle(forWritingAtPath: logPath)
         fileHandle?.seekToEndOfFile()

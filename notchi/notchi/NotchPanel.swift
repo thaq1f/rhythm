@@ -36,7 +36,7 @@ final class NotchPanel: NSPanel {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
-            NotificationCenter.default.post(name: .notchiShouldCollapse, object: nil)
+            NotificationCenter.default.post(name: .rhythmShouldCollapse, object: nil)
         }
     }
 }

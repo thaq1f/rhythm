@@ -1,14 +1,18 @@
 #!/bin/bash
-# Restart Rhythm (notchi.app) — run this anytime the app needs a fresh start
+# Restart Rhythm — run this anytime the app needs a fresh start
 set -e
-echo "⏹  Killing notchi..."
+echo "⏹  Killing Rhythm..."
+pkill -9 -f "Rhythm.app" 2>/dev/null || true
 pkill -9 -f "notchi.app" 2>/dev/null || true
 sleep 1
 echo "🔨 Building..."
-cd ~/conductor/workspaces/seiso-02/rhythm/notchi
+cd "$(dirname "$0")/notchi"
 xcodebuild -scheme notchi -configuration Debug \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
   2>&1 | tail -3
+APP_PATH="$(find ~/Library/Developer/Xcode/DerivedData/notchi-*/Build/Products/Debug -name 'Rhythm.app' -maxdepth 1)"
+echo "📦 Installing to /Applications..."
+cp -R "$APP_PATH" /Applications/Rhythm.app
+xattr -cr /Applications/Rhythm.app
 echo "🚀 Launching..."
-open "$(find ~/Library/Developer/Xcode/DerivedData/notchi-*/Build/Products/Debug -name 'notchi.app' -maxdepth 1)"
+open /Applications/Rhythm.app
 echo "✅ Rhythm is running"

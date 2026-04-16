@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "SessionStore")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "SessionStore")
 
 @MainActor
 @Observable
@@ -108,16 +108,26 @@ final class SessionStore {
                     scheduleResponseTimeout(sessionId: event.sessionId)
                 }
             } else if Self.needsPermissionApproval(tool: event.tool, permissionMode: session.permissionMode) {
-                // Tool needs user approval — hold the socket open for the response
-                let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
-                session.updateTask(.waiting)
-                session.setPendingQuestions([question])
-                if let fd = clientSocket {
-                    session.setPendingResponse(PendingResponse(clientSocket: fd, eventType: event.event))
-                    scheduleResponseTimeout(sessionId: event.sessionId)
-                } else {
-                    // No socket — display-only, user responds in terminal
+                // Sessions without a TTY are managed by a host (e.g. Conductor)
+                // that handles its own permissions — auto-allow, don't double-prompt.
+                if session.tty == nil {
+                    session.clearPendingQuestions()
                     session.updateTask(.working)
+                    if let fd = clientSocket {
+                        Self.respondAllow(to: fd)
+                    }
+                } else {
+                    // Terminal session — hold the socket open for user approval
+                    let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
+                    session.updateTask(.waiting)
+                    session.setPendingQuestions([question])
+                    if let fd = clientSocket {
+                        session.setPendingResponse(PendingResponse(clientSocket: fd, eventType: event.event))
+                        scheduleResponseTimeout(sessionId: event.sessionId)
+                    } else {
+                        // No socket — display-only, user responds in terminal
+                        session.updateTask(.working)
+                    }
                 }
             } else {
                 // Safe tool or auto-approved — respond immediately and proceed
@@ -129,6 +139,8 @@ final class SessionStore {
             }
 
         case "PermissionRequest":
+            // Skip display for host-managed sessions (Conductor) — the host owns the UI.
+            if session.tty == nil { break }
             // Informational only — PermissionRequest hooks are non-blocking in Claude Code.
             // If we already have a pending response from PreToolUse, don't overwrite it.
             if session.pendingResponse == nil {
@@ -403,7 +415,7 @@ final class SessionStore {
 
     private static let persistURL: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("notchi")
+        let dir = appSupport.appendingPathComponent("rhythm")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("sessions.json")
     }()
@@ -480,7 +492,7 @@ final class SessionStore {
                 // Process still running — reset transient states to .idle so the
                 // session wakes on the next hook event. Covers sessions that went
                 // sleeping or compacting due to inactivity and were persisted that way.
-                let restoredTask = NotchiTask(rawValue: entry.task ?? "") ?? .idle
+                let restoredTask = RhythmTask(rawValue: entry.task ?? "") ?? .idle
                 if restoredTask == .working || restoredTask == .waiting
                     || restoredTask == .compacting || restoredTask == .sleeping {
                     session.updateTask(.idle)

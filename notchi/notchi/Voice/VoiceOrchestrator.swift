@@ -5,7 +5,7 @@ import Observation
 import Combine
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "VoiceOrchestrator")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "VoiceOrchestrator")
 
 @MainActor
 @Observable

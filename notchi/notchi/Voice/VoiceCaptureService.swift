@@ -7,7 +7,7 @@ extension Notification.Name {
     static let voiceMaxDurationReached = Notification.Name("voiceMaxDurationReached")
 }
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "VoiceCapture")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "VoiceCapture")
 
 /// Audio format presets for different use cases
 enum AudioQualityPreset: String, CaseIterable, Identifiable {

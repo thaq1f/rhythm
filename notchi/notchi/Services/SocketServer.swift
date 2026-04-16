@@ -1,12 +1,12 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "SocketServer")
 
 typealias HookEventHandler = @Sendable (HookEvent, _ clientSocket: Int32?) -> Void
 
 final class SocketServer {
-    static let socketPath = "/tmp/notchi.sock"
+    static let socketPath = "/tmp/rhythm.sock"
     static let shared = SocketServer(socketPath: socketPath, clientReadTimeout: 0.5)
 
     private let socketPath: String
@@ -14,8 +14,8 @@ final class SocketServer {
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var eventHandler: HookEventHandler?
-    private let serverQueue = DispatchQueue(label: "com.ruban.notchi.socket.server", qos: .userInitiated)
-    private let clientQueue = DispatchQueue(label: "com.ruban.notchi.socket.client", qos: .userInitiated, attributes: .concurrent)
+    private let serverQueue = DispatchQueue(label: "com.ruban.rhythm.socket.server", qos: .userInitiated)
+    private let clientQueue = DispatchQueue(label: "com.ruban.rhythm.socket.client", qos: .userInitiated, attributes: .concurrent)
 
     init(socketPath: String = SocketServer.socketPath, clientReadTimeout: TimeInterval = 0.5) {
         self.socketPath = socketPath

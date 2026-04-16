@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "HookInstaller")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "HookInstaller")
 
 struct HookInstaller {
 
@@ -16,7 +16,7 @@ struct HookInstaller {
         }
 
         let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let hookScript = hooksDir.appendingPathComponent("notchi-hook.sh")
+        let hookScript = hooksDir.appendingPathComponent("rhythm-hook.sh")
         let settings = claudeDir.appendingPathComponent("settings.json")
 
         do {
@@ -29,7 +29,14 @@ struct HookInstaller {
             return false
         }
 
-        if let bundled = Bundle.main.url(forResource: "notchi-hook", withExtension: "sh") {
+        // Clean up legacy notchi-hook.sh if present
+        let legacyHook = hooksDir.appendingPathComponent("notchi-hook.sh")
+        if FileManager.default.fileExists(atPath: legacyHook.path) {
+            try? FileManager.default.removeItem(at: legacyHook)
+            logger.info("Removed legacy notchi-hook.sh")
+        }
+
+        if let bundled = Bundle.main.url(forResource: "rhythm-hook", withExtension: "sh") {
             do {
                 let bundledData = try Data(contentsOf: bundled)
                 try bundledData.write(to: hookScript, options: .atomic)
@@ -57,7 +64,7 @@ struct HookInstaller {
             json = existing
         }
 
-        let command = "~/.claude/hooks/notchi-hook.sh"
+        let command = "~/.claude/hooks/rhythm-hook.sh"
         let hookEntry: [[String: Any]] = [["type": "command", "command": command]]
         let withMatcher: [[String: Any]] = [["matcher": "*", "hooks": hookEntry]]
         let withoutMatcher: [[String: Any]] = [["hooks": hookEntry]]
@@ -67,6 +74,21 @@ struct HookInstaller {
         ]
 
         var hooks = json["hooks"] as? [String: Any] ?? [:]
+
+        // Remove legacy notchi-hook.sh entries from all events
+        for (event, value) in hooks {
+            if var entries = value as? [[String: Any]] {
+                entries.removeAll { entry in
+                    if let entryHooks = entry["hooks"] as? [[String: Any]] {
+                        return entryHooks.contains { h in
+                            (h["command"] as? String)?.contains("notchi-hook.sh") == true
+                        }
+                    }
+                    return false
+                }
+                hooks[event] = entries.isEmpty ? nil : entries
+            }
+        }
 
         let hookEvents: [(String, [[String: Any]])] = [
             ("UserPromptSubmit", withoutMatcher),
@@ -86,7 +108,7 @@ struct HookInstaller {
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         return entryHooks.contains { h in
                             let cmd = h["command"] as? String ?? ""
-                            return cmd.contains("notchi-hook.sh")
+                            return cmd.contains("rhythm-hook.sh")
                         }
                     }
                     return false
@@ -112,7 +134,7 @@ struct HookInstaller {
 
         do {
             try data.write(to: settingsURL)
-            logger.info("Updated settings.json with Notchi hooks")
+            logger.info("Updated settings.json with Rhythm hooks")
             return true
         } catch {
             logger.error("Failed to write settings.json: \(error.localizedDescription)")
@@ -135,7 +157,7 @@ struct HookInstaller {
             return entries.contains { entry in
                 guard let entryHooks = entry["hooks"] as? [[String: Any]] else { return false }
                 return entryHooks.contains { hook in
-                    (hook["command"] as? String)?.contains("notchi-hook.sh") == true
+                    (hook["command"] as? String)?.contains("rhythm-hook.sh") == true
                 }
             }
         }
@@ -145,7 +167,7 @@ struct HookInstaller {
         let claudeDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude")
         let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let hookScript = hooksDir.appendingPathComponent("notchi-hook.sh")
+        let hookScript = hooksDir.appendingPathComponent("rhythm-hook.sh")
         let settings = claudeDir.appendingPathComponent("settings.json")
 
         try? FileManager.default.removeItem(at: hookScript)
@@ -162,7 +184,7 @@ struct HookInstaller {
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         return entryHooks.contains { hook in
                             let cmd = hook["command"] as? String ?? ""
-                            return cmd.contains("notchi-hook.sh")
+                            return cmd.contains("rhythm-hook.sh")
                         }
                     }
                     return false
@@ -189,6 +211,6 @@ struct HookInstaller {
             try? data.write(to: settings)
         }
 
-        logger.info("Uninstalled Notchi hooks")
+        logger.info("Uninstalled Rhythm hooks")
     }
 }

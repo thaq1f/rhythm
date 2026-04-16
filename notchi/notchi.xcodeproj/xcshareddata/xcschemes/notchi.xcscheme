@@ -16,8 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "47C922812F2CFA1F00EA1E18"
-               BuildableName = "notchi.app"
-               BlueprintName = "notchi"
+               BuildableName = "rhythm.app"
+               BlueprintName = "rhythm"
                ReferencedContainer = "container:notchi.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -58,8 +58,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "47C922812F2CFA1F00EA1E18"
-            BuildableName = "notchi.app"
-            BlueprintName = "notchi"
+            BuildableName = "rhythm.app"
+            BlueprintName = "rhythm"
             ReferencedContainer = "container:notchi.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -75,8 +75,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "47C922812F2CFA1F00EA1E18"
-            BuildableName = "notchi.app"
-            BlueprintName = "notchi"
+            BuildableName = "rhythm.app"
+            BlueprintName = "rhythm"
             ReferencedContainer = "container:notchi.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

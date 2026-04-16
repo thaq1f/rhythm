@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "AgentSessions")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "AgentSessions")
 
 struct ConversationMessage: Identifiable {
     let id = UUID()

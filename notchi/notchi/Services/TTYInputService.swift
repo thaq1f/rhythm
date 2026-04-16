@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import os.log
 
-private nonisolated(unsafe) let logger = Logger(subsystem: "com.ruban.notchi", category: "TTYInput")
+private nonisolated(unsafe) let logger = Logger(subsystem: "com.ruban.rhythm", category: "TTYInput")
 
 /// Injects text into a terminal tty using TIOCSTI via a Perl subprocess.
 ///

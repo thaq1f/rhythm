@@ -1,6 +1,6 @@
 import AppKit
 
-enum NotchiTask: String, CaseIterable {
+enum RhythmTask: String, CaseIterable {
     case idle, working, sleeping, compacting, waiting
 
     var animationFPS: Double {
@@ -75,7 +75,7 @@ enum NotchiTask: String, CaseIterable {
     }
 }
 
-enum NotchiEmotion: String, CaseIterable {
+enum RhythmEmotion: String, CaseIterable {
     case neutral, happy, sad, sob
 
     var swayAmplitude: Double {
@@ -88,9 +88,9 @@ enum NotchiEmotion: String, CaseIterable {
     }
 }
 
-struct NotchiState: Equatable {
-    var task: NotchiTask
-    var emotion: NotchiEmotion = .neutral
+struct RhythmState: Equatable {
+    var task: RhythmTask
+    var emotion: RhythmEmotion = .neutral
 
     /// Resolves the sprite sheet name with fallback chain: exact emotion -> sad (for sob) -> neutral.
     var spriteSheetName: String {
@@ -118,9 +118,9 @@ struct NotchiState: Equatable {
     var frameCount: Int { task.frameCount }
     var columns: Int { task.columns }
 
-    static let idle = NotchiState(task: .idle)
-    static let working = NotchiState(task: .working)
-    static let sleeping = NotchiState(task: .sleeping)
-    static let compacting = NotchiState(task: .compacting)
-    static let waiting = NotchiState(task: .waiting)
+    static let idle = RhythmState(task: .idle)
+    static let working = RhythmState(task: .working)
+    static let sleeping = RhythmState(task: .sleeping)
+    static let compacting = RhythmState(task: .compacting)
+    static let waiting = RhythmState(task: .waiting)
 }
