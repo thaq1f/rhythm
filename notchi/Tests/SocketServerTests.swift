@@ -133,7 +133,7 @@ final class SocketServerTests: XCTestCase {
 
         let duplicateServer = SocketServer(socketPath: listeningPath, clientReadTimeout: 0.5)
         activeServers.append((duplicateServer, listeningPath))
-        duplicateServer.start { event in
+        duplicateServer.start { event, _ in
             Task {
                 await secondRecorder.record(event)
             }
@@ -163,7 +163,7 @@ final class SocketServerTests: XCTestCase {
         let server = SocketServer(socketPath: path, clientReadTimeout: clientReadTimeout)
         activeServers.append((server, path))
 
-        server.start { event in
+        server.start { event, _ in
             Task {
                 await recorder.record(event)
             }

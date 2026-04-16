@@ -67,7 +67,7 @@ final class RhythmStateMachineTests: XCTestCase {
     ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
-            cwd: "/tmp",
+            cwd: "/tmp/test-project",
             event: event,
             status: status,
             pid: nil,
@@ -76,8 +76,10 @@ final class RhythmStateMachineTests: XCTestCase {
             toolInput: nil,
             toolUseId: nil,
             userPrompt: userPrompt,
+            result: nil,
             permissionMode: nil,
-            interactive: true
+            interactive: true,
+            needsResponse: nil
         )
     }
 }
