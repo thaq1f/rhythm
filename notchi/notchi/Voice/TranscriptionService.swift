@@ -15,6 +15,9 @@ actor TranscriptionService {
     enum State { case idle, loading, ready, failed(String) }
     private(set) var state: State = .idle
 
+    /// True while the model is downloading or initializing.
+    var isModelLoading: Bool { if case .loading = state { return true }; return false }
+
     /// Download model (~600MB first time) and load onto ANE. Safe to call multiple times.
     func warmUp() async {
         guard case .idle = state else { return }
@@ -26,9 +29,10 @@ actor TranscriptionService {
         logger.info("Warming up Parakeet TDT v3…")
 
         do {
-            asrManager = AsrManager()
+            let mgr = AsrManager()
             let models = try await AsrModels.downloadAndLoad(version: .v3)
-            try await asrManager?.initialize(models: models)
+            try await mgr.initialize(models: models)
+            asrManager = mgr          // only set after successful init
             state = .ready
             logger.info("Parakeet ready")
         } catch {
@@ -40,13 +44,24 @@ actor TranscriptionService {
 
     /// Transcribe a 16kHz mono WAV file. Auto-initializes if not yet ready.
     func transcribe(_ audioURL: URL) async throws -> String {
-        if asrManager == nil { await warmUp() }
-        guard let mgr = asrManager else {
+        // Start warmup if not yet begun
+        if case .idle = state { await warmUp() }
+
+        // If still loading (warmup started elsewhere), poll until done
+        if case .loading = state {
+            var waited = 0
+            while case .loading = state, waited < 60 {
+                try await Task.sleep(for: .milliseconds(500))
+                waited += 1
+            }
+        }
+
+        guard let mgr = asrManager, case .ready = state else {
             throw TranscriptionError.notReady
         }
 
         logger.info("Transcribing \(audioURL.lastPathComponent)")
-        let result = try await mgr.transcribe(audioURL)
+        let result = try await mgr.transcribe(audioURL, source: .microphone)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         logger.info("Transcribed \(text.count) chars")
         return text

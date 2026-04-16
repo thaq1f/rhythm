@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         startHookServices()
         DiagLog.shared.write("APP: Restoring sessions")
         SessionStore.shared.restoreSessions()
+        SessionStore.shared.startLivenessPolling()
         startUsageService()
         // Request accessibility BEFORE voice services — CGEvent tap needs it for .defaultTap
         AccessibilityService.shared.requestPermissionIfNeeded()
@@ -52,9 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
 
     private func startHookServices() {
         HookInstaller.installIfNeeded()
-        SocketServer.shared.start { event in
+        SocketServer.shared.start { event, clientSocket in
             Task { @MainActor in
-                NotchiStateMachine.shared.handleEvent(event)
+                NotchiStateMachine.shared.handleEvent(event, clientSocket: clientSocket)
             }
         }
     }

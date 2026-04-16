@@ -3,6 +3,10 @@ import Combine
 import CoreAudio
 import os.log
 
+extension Notification.Name {
+    static let voiceMaxDurationReached = Notification.Name("voiceMaxDurationReached")
+}
+
 private let logger = Logger(subsystem: "com.ruban.notchi", category: "VoiceCapture")
 
 /// Audio format presets for different use cases
@@ -334,22 +338,24 @@ final class VoiceCaptureService: NSObject, ObservableObject {
         audioDB = -60
         captureQueue.async { session?.stopRunning() }
 
-        guard !audioBuffers.isEmpty, let fileURL = tempFileURL else { return nil }
+        // Grab buffers and clear immediately to free memory.
+        let buffers = audioBuffers
+        audioBuffers.removeAll()
+        guard !buffers.isEmpty, let fileURL = tempFileURL else { return nil }
 
+        // Resample synchronously but with the data already captured.
+        // This runs on the main actor but with bounded data (max 15s).
         do {
-            // Always output 16kHz mono for ASR compatibility
             let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
             let outputFile = try AVAudioFile(forWriting: fileURL, settings: outputFormat.settings)
-            for buffer in audioBuffers {
+            for buffer in buffers {
                 if let converted = resample(buffer: buffer, to: outputFormat) {
                     try outputFile.write(from: converted)
                 }
             }
-            audioBuffers.removeAll()
             return fileURL
         } catch {
             logger.error("Failed to write audio: \(error.localizedDescription)")
-            audioBuffers.removeAll()
             return nil
         }
     }

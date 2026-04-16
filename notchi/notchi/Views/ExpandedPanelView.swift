@@ -165,6 +165,10 @@ struct ExpandedPanelView: View {
                 if hasActivity {
                     Divider().background(Color.white.opacity(0.08))
                     activitySection
+                } else if effectiveSession != nil && !isActivityCollapsed {
+                    // Session exists but no recent activity — show idle hint, not "New Session"
+                    Spacer()
+                    sessionIdleState
                 } else if !isActivityCollapsed {
                     Spacer()
                     emptyState
@@ -176,6 +180,11 @@ struct ExpandedPanelView: View {
 
                 if showIndicator && !isActivityCollapsed {
                     WorkingIndicatorView(state: state)
+                }
+
+                if voiceOrchestrator.presentationState.currentState != .idle && !isActivityCollapsed {
+                    VoiceRecordingBarView(state: voiceOrchestrator.presentationState)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: voiceOrchestrator.presentationState.currentState.isRecording)
                 }
 
                 UsageBarView(
@@ -219,7 +228,15 @@ struct ExpandedPanelView: View {
                     ScrollViewReader { proxy in
                         ScrollView(showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
-                                if let prompt = effectiveSession?.lastUserPrompt {
+                                if let voicePrompt = effectiveSession?.pendingVoicePrompt {
+                                    VoicePromptBubbleView(text: voicePrompt)
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                        .padding(.bottom, 8)
+                                        .transition(.asymmetric(
+                                            insertion: .scale(scale: 0.85, anchor: .trailing).combined(with: .opacity),
+                                            removal: .opacity.animation(.easeOut(duration: 0.15))
+                                        ))
+                                } else if let prompt = effectiveSession?.lastUserPrompt {
                                     UserPromptBubbleView(text: prompt)
                                         .frame(maxWidth: .infinity, alignment: .trailing)
                                         .padding(.bottom, 8)
@@ -238,7 +255,27 @@ struct ExpandedPanelView: View {
 
                                 let questions = effectiveSession?.pendingQuestions ?? []
                                 if !questions.isEmpty {
-                                    QuestionPromptView(questions: questions)
+                                    QuestionPromptView(
+                                        questions: questions,
+                                        hasPendingResponse: effectiveSession?.pendingResponse != nil,
+                                        onOptionSelected: { label in
+                                            guard let sessionId = effectiveSession?.id else { return }
+                                            let decision: String
+                                            let reason: String?
+                                            switch label {
+                                            case "Yes", "Yes, and don't ask again":
+                                                decision = "allow"
+                                                reason = nil
+                                            case "No":
+                                                decision = "deny"
+                                                reason = "User denied from Rhythm"
+                                            default:
+                                                decision = "allow"
+                                                reason = nil
+                                            }
+                                            sessionStore.resolvePermission(sessionId: sessionId, decision: decision, reason: reason)
+                                        }
+                                    )
                                         .id("question-prompt")
                                 }
                             }
@@ -270,6 +307,20 @@ struct ExpandedPanelView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    private var sessionIdleState: some View {
+        VStack(spacing: 8) {
+            if let session = effectiveSession {
+                Text("\(session.projectName) #\(session.sessionNumber)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(TerminalColors.primaryText)
+                Text("Idle · Hold Fn to speak")
+                    .font(.system(size: 11))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyState: some View {

@@ -56,7 +56,17 @@ struct ActivityRowView: View {
 
 struct QuestionPromptView: View {
     let questions: [PendingQuestion]
+    let hasPendingResponse: Bool
+    let onOptionSelected: ((String) -> Void)?
     @State private var currentIndex = 0
+    @State private var hoveredOption: Int?
+    @State private var pressedOption: Int?
+
+    init(questions: [PendingQuestion], hasPendingResponse: Bool = false, onOptionSelected: ((String) -> Void)? = nil) {
+        self.questions = questions
+        self.hasPendingResponse = hasPendingResponse
+        self.onOptionSelected = onOptionSelected
+    }
 
     private var clampedIndex: Int {
         min(currentIndex, questions.count - 1)
@@ -74,16 +84,20 @@ struct QuestionPromptView: View {
         VStack(alignment: .leading, spacing: 6) {
             questionHeader
             questionText
-            optionsList
+            if hasPendingResponse {
+                interactiveOptions
+            } else {
+                optionsList
+            }
             answerHint
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TerminalColors.subtleBackground)
+        .background(hasPendingResponse ? TerminalColors.claudeOrange.opacity(0.06) : TerminalColors.subtleBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(TerminalColors.claudeOrange.opacity(0.3), lineWidth: 1)
+                .stroke(hasPendingResponse ? TerminalColors.claudeOrange.opacity(0.5) : TerminalColors.claudeOrange.opacity(0.3), lineWidth: hasPendingResponse ? 1.5 : 1)
         )
         .padding(.vertical, 4)
         .onChange(of: questions.count) {
@@ -94,11 +108,18 @@ struct QuestionPromptView: View {
     private var questionHeader: some View {
         HStack {
             if let header = current.header {
-                Text(header)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(TerminalColors.claudeOrange)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+                HStack(spacing: 4) {
+                    if hasPendingResponse {
+                        Circle()
+                            .fill(TerminalColors.claudeOrange)
+                            .frame(width: 6, height: 6)
+                    }
+                    Text(header)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(TerminalColors.claudeOrange)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                }
             }
 
             if hasMultipleQuestions {
@@ -142,6 +163,80 @@ struct QuestionPromptView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    // MARK: - Interactive options (when Rhythm can respond)
+
+    private var interactiveOptions: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(current.options.enumerated()), id: \.offset) { index, option in
+                Button(action: {
+                    withAnimation(.spring(duration: 0.2, bounce: 0.15)) {
+                        pressedOption = index
+                    }
+                    onOptionSelected?(option.label)
+                }) {
+                    Text(option.label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(buttonTextColor(for: option.label))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(buttonBackground(for: option.label, index: index))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(buttonBorderColor(for: option.label, index: index), lineWidth: 1)
+                        )
+                        .scaleEffect(pressedOption == index ? 0.95 : (hoveredOption == index ? 1.02 : 1.0))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHovered in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        hoveredOption = isHovered ? index : nil
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func buttonTextColor(for label: String) -> Color {
+        switch label {
+        case "No":
+            return TerminalColors.red.opacity(0.9)
+        default:
+            return .white.opacity(0.95)
+        }
+    }
+
+    private func buttonBackground(for label: String, index: Int) -> Color {
+        let isHovered = hoveredOption == index
+        switch label {
+        case "Yes":
+            return TerminalColors.green.opacity(isHovered ? 0.35 : 0.2)
+        case "Yes, and don't ask again":
+            return TerminalColors.claudeOrange.opacity(isHovered ? 0.3 : 0.15)
+        case "No":
+            return TerminalColors.red.opacity(isHovered ? 0.2 : 0.08)
+        default:
+            return Color.white.opacity(isHovered ? 0.15 : 0.08)
+        }
+    }
+
+    private func buttonBorderColor(for label: String, index: Int) -> Color {
+        let isHovered = hoveredOption == index
+        switch label {
+        case "Yes":
+            return TerminalColors.green.opacity(isHovered ? 0.6 : 0.3)
+        case "Yes, and don't ask again":
+            return TerminalColors.claudeOrange.opacity(isHovered ? 0.5 : 0.25)
+        case "No":
+            return TerminalColors.red.opacity(isHovered ? 0.4 : 0.2)
+        default:
+            return Color.white.opacity(isHovered ? 0.3 : 0.12)
+        }
+    }
+
+    // MARK: - Static options (read-only display)
+
     private var optionsList: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(current.options.enumerated()), id: \.offset) { index, option in
@@ -168,9 +263,17 @@ struct QuestionPromptView: View {
     }
 
     private var answerHint: some View {
-        Text("Answer in terminal")
-            .font(.system(size: 10).italic())
-            .foregroundColor(TerminalColors.dimmedText)
+        Group {
+            if hasPendingResponse {
+                Text("Click to respond from here")
+                    .font(.system(size: 10, weight: .medium).italic())
+                    .foregroundColor(TerminalColors.claudeOrange.opacity(0.8))
+            } else {
+                Text("Answer in terminal")
+                    .font(.system(size: 10).italic())
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        }
     }
 }
 

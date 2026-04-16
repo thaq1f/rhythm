@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import Observation
@@ -19,6 +20,8 @@ final class VoiceOrchestrator {
     private var cancellables = Set<AnyCancellable>()
     private var isRecording = false
     private var permissionGranted: Bool?  // nil = unchecked
+    private var processingTask: Task<Void, Never>?
+    private var recordingOriginApp: NSRunningApplication?
 
     private init() {
         wireKeyListener()
@@ -76,6 +79,13 @@ final class VoiceOrchestrator {
     // MARK: - Record Start (NEVER blocks main thread)
 
     private func handleRecordStart() {
+        recordingOriginApp = NSWorkspace.shared.frontmostApplication
+        // Cancel any previous transcription/injection so we don't accumulate stuck tasks.
+        processingTask?.cancel()
+        processingTask = nil
+        if presentationState.currentState != .idle && !isRecording {
+            presentationState.reset()
+        }
         DiagLog.shared.write("VOICE: handleRecordStart called (isRecording=\(isRecording), captureRecording=\(capture.isRecording), permission=\(permissionGranted ?? false))")
         // Safety: if a previous recording got stuck, force-reset before starting
         if isRecording && !capture.isRecording {
@@ -156,22 +166,37 @@ final class VoiceOrchestrator {
         }
         isRecording = false
 
-        presentationState.currentState = .processing(hint: "transcribing")
+        presentationState.currentState = .processing(hint: "transcribing…")
 
         let audioURL = capture.stopRecording()
-        processRecording(audioURL: audioURL)
+        processRecording(audioURL: audioURL, originApp: recordingOriginApp)
     }
 
-    private func processRecording(audioURL: URL?) {
-        Task {
+    private func processRecording(audioURL: URL?, originApp: NSRunningApplication?) {
+        processingTask?.cancel()
+        // Capture routing state synchronously at Fn-UP, before any async gap.
+        let panelWasOpen = NotchPanelManager.shared.isExpanded
+        let capturedSession = SessionStore.shared.effectiveSession
+        processingTask = Task {
             guard let audioURL else {
                 DiagLog.shared.write("VOICE: No audio URL, resetting")
                 presentationState.reset()
                 return
             }
 
+            // Update hint live — declared outside do/catch so it can be cancelled in either path.
+            var hintTask: Task<Void, Never>? = Task { @MainActor [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    let isLoading = await TranscriptionService.shared.isModelLoading
+                    self.presentationState.currentState = .processing(hint: isLoading ? "loading model…" : "transcribing…")
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
             do {
                 let transcript = try await TranscriptionService.shared.transcribe(audioURL)
+                hintTask?.cancel()
+                hintTask = nil
 
                 // Clean up temp audio file
                 try? FileManager.default.removeItem(at: audioURL)
@@ -182,16 +207,89 @@ final class VoiceOrchestrator {
                     return
                 }
 
-                DiagLog.shared.write("VOICE: Transcript ready (\(transcript.count) chars), pasting via Cmd+V")
-                AccessibilityService.shared.pasteText(transcript)
+                // Route using state captured at Fn-UP time (before the async transcription gap).
+                DiagLog.shared.write("VOICE: routing — panelWasOpen=\(panelWasOpen), hasSession=\(capturedSession != nil)")
+                if panelWasOpen, let session = capturedSession {
+                    // Warn if Claude is currently processing — the message will queue.
+                    let isClaudeBusy = session.task == .working || session.task == .compacting
+                    // Show transcript bubble immediately (optimistic).
+                    SessionStore.shared.recordVoicePrompt(transcript, for: session.id)
+                    presentationState.currentState = .processing(hint: isClaudeBusy ? "queuing…" : "sending…")
+
+                    // Resolve tty from this session's own identity only.
+                    // System-wide process scan is intentionally absent — it would find
+                    // an unrelated terminal Claude and inject there instead of the
+                    // correct target (e.g. it would miss Conductor and hit a Terminal).
+                    let resolvedTTY: String?
+                    if let stored = session.tty {
+                        resolvedTTY = stored
+                        DiagLog.shared.write("VOICE: Using stored tty \(stored)")
+                    } else if let pid = session.pid, pid > 0,
+                              let found = await Task.detached(priority: .userInitiated) { TTYInputService.lookupTTY(for: pid) }.value {
+                        resolvedTTY = found
+                        DiagLog.shared.write("VOICE: ps lookup found tty \(found) for pid \(pid)")
+                    } else {
+                        resolvedTTY = nil
+                        DiagLog.shared.write("VOICE: No tty for session — falling back to paste")
+                    }
+
+                    if resolvedTTY != nil, let pid = session.pid, pid > 0 {
+                        // Find the terminal app and switch to the correct tab.
+                        let cwd = session.cwd
+                        let termApp = await Task.detached(priority: .userInitiated) {
+                            TTYInputService.findAndActivateTerminal(for: pid, cwd: cwd)
+                        }.value
+                        if let termApp {
+                            termApp.activate(options: .activateIgnoringOtherApps)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: termApp)
+                            DiagLog.shared.write("VOICE: Pasted to \(termApp.localizedName ?? "?") for \(session.projectName)")
+                        } else {
+                            DiagLog.shared.write("VOICE: Could not find terminal app for pid \(pid)")
+                            SessionStore.shared.clearVoicePrompt(for: session.id)
+                            presentationState.currentState = .processing(hint: "couldn't reach Claude")
+                            try? await Task.sleep(for: .seconds(1.5))
+                            presentationState.reset()
+                            return
+                        }
+                    } else {
+                        // No TTY — session is from Conductor or similar non-terminal host.
+                        SessionStore.shared.clearVoicePrompt(for: session.id)
+                        let conductorApp = NSWorkspace.shared.runningApplications.first {
+                            $0.localizedName?.lowercased().contains("conductor") == true ||
+                            $0.bundleIdentifier?.lowercased().contains("conductor") == true
+                        }
+                        if let target = conductorApp {
+                            target.activate(options: .activateIgnoringOtherApps)
+                            try? await Task.sleep(for: .milliseconds(200))
+                            // Don't focus AX elements — "Terminal input" is the terminal
+                            // panel, not the chat input. Just activate and paste.
+                            DiagLog.shared.write("VOICE: Sending to Conductor")
+                            AccessibilityService.shared.pasteTextAndReturn(transcript, targetApp: target)
+                        } else {
+                            DiagLog.shared.write("VOICE: No tty, no Conductor — showing hint")
+                            presentationState.currentState = .processing(hint: "start Claude in a terminal first")
+                            try? await Task.sleep(for: .seconds(2))
+                            presentationState.reset()
+                            return
+                        }
+                    }
+                } else {
+                    // Panel was closed — general dictation mode. Paste only, no Return.
+                    // Return is only sent when routing to a Claude session via the notch.
+                    DiagLog.shared.write("VOICE: Panel closed — pasting \(transcript.count) chars (no Return)")
+                    AccessibilityService.shared.pasteText(transcript)
+                }
 
                 presentationState.currentState = .success
                 try? await Task.sleep(for: .seconds(0.6))
                 presentationState.reset()
             } catch {
+                hintTask?.cancel()     // stop the loading/transcribing loop immediately
+                hintTask = nil
                 logger.error("Transcription failed: \(error)")
                 DiagLog.shared.write("VOICE: Transcription error: \(error.localizedDescription)")
-                presentationState.currentState = .processing(hint: "Transcription failed")
+                presentationState.currentState = .processing(hint: "transcription failed")
                 try? await Task.sleep(for: .seconds(1.5))
                 presentationState.reset()
             }

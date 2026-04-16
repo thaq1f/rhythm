@@ -3,7 +3,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
 
-typealias HookEventHandler = @Sendable (HookEvent) -> Void
+typealias HookEventHandler = @Sendable (HookEvent, _ clientSocket: Int32?) -> Void
 
 final class SocketServer {
     static let socketPath = "/tmp/notchi.sock"
@@ -213,17 +213,26 @@ final class SocketServer {
     }
 
     private func handleClient(_ clientSocket: Int32, eventHandler: HookEventHandler?) {
-        defer { close(clientSocket) }
-
-        guard let allData = readClientPayload(from: clientSocket), !allData.isEmpty else { return }
+        guard let allData = readClientPayload(from: clientSocket), !allData.isEmpty else {
+            close(clientSocket)
+            return
+        }
 
         guard let event = try? JSONDecoder().decode(HookEvent.self, from: allData) else {
             logger.warning("Failed to parse event")
+            close(clientSocket)
             return
         }
 
         logEvent(event)
-        eventHandler?(event)
+
+        if event.needsResponse == true {
+            // Pass the open socket FD — the handler is responsible for eventually closing it
+            eventHandler?(event, clientSocket)
+        } else {
+            close(clientSocket)
+            eventHandler?(event, nil)
+        }
     }
 
     private func readClientPayload(from clientSocket: Int32) -> Data? {
@@ -318,6 +327,20 @@ final class SocketServer {
             logger.info("Done")
         default:
             break
+        }
+    }
+
+    static func sendResponse(_ data: Data, to clientSocket: Int32) {
+        defer { close(clientSocket) }
+        var totalWritten = 0
+        let count = data.count
+        data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            while totalWritten < count {
+                let written = write(clientSocket, baseAddress + totalWritten, count - totalWritten)
+                if written <= 0 { break }
+                totalWritten += written
+            }
         }
     }
 }

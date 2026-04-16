@@ -9,6 +9,12 @@ struct PendingQuestion {
     let options: [(label: String, description: String?)]
 }
 
+struct PendingResponse: Sendable {
+    let clientSocket: Int32
+    let eventType: String
+    let createdAt: Date = Date()
+}
+
 @MainActor
 @Observable
 final class SessionData: Identifiable {
@@ -20,6 +26,7 @@ final class SessionData: Identifiable {
     let spriteYOffset: CGFloat
     let isInteractive: Bool
     private(set) var pid: Int?
+    private(set) var tty: String?
 
     private(set) var task: NotchiTask = .idle
     let emotionState = EmotionState()
@@ -34,6 +41,8 @@ final class SessionData: Identifiable {
     private(set) var promptSubmitTime: Date?
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
+    private(set) var pendingVoicePrompt: String?
+    private(set) var pendingResponse: PendingResponse?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -143,6 +152,10 @@ final class SessionData: Identifiable {
         if let pid { self.pid = pid }
     }
 
+    func updateTty(_ newTty: String?) {
+        if let newTty { tty = newTty }
+    }
+
     func setPendingQuestions(_ questions: [PendingQuestion]) {
         pendingQuestions = questions
         lastActivity = Date()
@@ -150,6 +163,20 @@ final class SessionData: Identifiable {
 
     func clearPendingQuestions() {
         pendingQuestions = []
+    }
+
+    func setPendingVoicePrompt(_ text: String?) {
+        pendingVoicePrompt = text
+        if text != nil { lastActivity = Date() }
+    }
+
+    func setPendingResponse(_ response: PendingResponse?) {
+        // Close previous socket if replacing
+        if let existing = pendingResponse, response != nil {
+            let fd = existing.clientSocket
+            DispatchQueue.global(qos: .utility).async { close(fd) }
+        }
+        pendingResponse = response
     }
 
     func recordPreToolUse(tool: String?, toolInput: [String: Any]?, toolUseId: String?) {
@@ -214,6 +241,11 @@ final class SessionData: Identifiable {
         durationTimer = nil
         sleepTimer?.cancel()
         sleepTimer = nil
+        if let pending = pendingResponse {
+            let fd = pending.clientSocket
+            DispatchQueue.global(qos: .utility).async { close(fd) }
+            pendingResponse = nil
+        }
         isProcessing = false
     }
 

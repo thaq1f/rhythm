@@ -10,6 +10,8 @@ final class SessionStore {
 
     private(set) var sessions: [String: SessionData] = [:]
     private(set) var selectedSessionId: String?
+    /// The session that most recently received a hook event (likely the active workspace in Conductor).
+    private(set) var lastHookSessionId: String?
     private var nextSessionNumberByProject: [String: Int] = [:]
 
     private init() {}
@@ -50,10 +52,22 @@ final class SessionStore {
         logger.info("Selected session: \(sessionId ?? "nil", privacy: .public)")
     }
 
-    func process(_ event: HookEvent) -> SessionData {
+    func process(_ event: HookEvent, clientSocket: Int32? = nil) -> SessionData {
+        let _tty = event.tty ?? "nil"; let _pid = event.pid.map(String.init) ?? "nil"
+        DiagLog.shared.write("SESSION: Hook \(event.event) for \(event.sessionId.prefix(8))… tty=\(_tty) pid=\(_pid)")
+
+        // Ignore hooks from non-project paths (e.g. /tmp from manual tests)
+        let cwd = event.cwd
+        if cwd == "/tmp" || cwd == "/" || cwd.isEmpty {
+            DiagLog.shared.write("SESSION: Ignoring hook from non-project cwd: \(cwd)")
+            return SessionData(sessionId: event.sessionId, cwd: cwd, sessionNumber: 0, isInteractive: true, existingXPositions: [])
+        }
+
+        lastHookSessionId = event.sessionId
         let isInteractive = event.interactive ?? true
         let session = getOrCreateSession(sessionId: event.sessionId, cwd: event.cwd, isInteractive: isInteractive)
         session.updatePid(event.pid)
+        session.updateTty(event.tty)
         let isProcessing = event.status != "waiting_for_input"
         session.updateProcessingState(isProcessing: isProcessing)
 
@@ -63,6 +77,7 @@ final class SessionStore {
 
         switch event.event {
         case "UserPromptSubmit":
+            session.setPendingVoicePrompt(nil)
             if let prompt = event.userPrompt {
                 session.recordUserPrompt(prompt)
             }
@@ -85,34 +100,64 @@ final class SessionStore {
         case "PreToolUse":
             let toolInput = event.toolInput?.mapValues { $0.value }
             session.recordPreToolUse(tool: event.tool, toolInput: toolInput, toolUseId: event.toolUseId)
-            if event.tool == "AskUserQuestion" {
+            if Self.isAskUserQuestion(event.tool) {
                 session.updateTask(.waiting)
                 session.setPendingQuestions(Self.parseQuestions(from: event.toolInput))
+                if let fd = clientSocket {
+                    session.setPendingResponse(PendingResponse(clientSocket: fd, eventType: event.event))
+                    scheduleResponseTimeout(sessionId: event.sessionId)
+                }
+            } else if Self.needsPermissionApproval(tool: event.tool, permissionMode: session.permissionMode) {
+                // Tool needs user approval — hold the socket open for the response
+                let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
+                session.updateTask(.waiting)
+                session.setPendingQuestions([question])
+                if let fd = clientSocket {
+                    session.setPendingResponse(PendingResponse(clientSocket: fd, eventType: event.event))
+                    scheduleResponseTimeout(sessionId: event.sessionId)
+                } else {
+                    // No socket — display-only, user responds in terminal
+                    session.updateTask(.working)
+                }
             } else {
+                // Safe tool or auto-approved — respond immediately and proceed
                 session.clearPendingQuestions()
                 session.updateTask(.working)
+                if let fd = clientSocket {
+                    Self.respondAllow(to: fd)
+                }
             }
 
         case "PermissionRequest":
-            let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
-            session.updateTask(.waiting)
-            session.setPendingQuestions([question])
+            // Informational only — PermissionRequest hooks are non-blocking in Claude Code.
+            // If we already have a pending response from PreToolUse, don't overwrite it.
+            if session.pendingResponse == nil {
+                let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
+                session.updateTask(.waiting)
+                session.setPendingQuestions([question])
+            }
 
         case "PostToolUse":
             let success = event.status != "error"
             session.recordPostToolUse(tool: event.tool, toolUseId: event.toolUseId, success: success)
-            session.clearPendingQuestions()
+            // Don't clear questions if user hasn't responded yet
+            if session.pendingResponse == nil {
+                session.clearPendingQuestions()
+            }
             session.updateTask(.working)
 
         case "Stop", "SubagentStop":
             session.clearPendingQuestions()
+            if let result = event.result, !result.isEmpty {
+                let msg = AssistantMessage(id: event.sessionId + "-stop", text: result, timestamp: Date())
+                session.recordAssistantMessages([msg])
+            }
             session.updateTask(.idle)
 
         case "SessionEnd":
-            // Keep session visible as sleeping sprite (like a tab).
-            // Only removed when user explicitly dismisses it.
             session.updateTask(.sleeping)
             session.updateProcessingState(isProcessing: false)
+            scheduleAutoRemoval(sessionId: event.sessionId, delay: 30)
 
         default:
             if !isProcessing && session.task != .idle {
@@ -124,6 +169,14 @@ final class SessionStore {
         return session
     }
 
+    func recordVoicePrompt(_ text: String, for sessionId: String) {
+        sessions[sessionId]?.setPendingVoicePrompt(text)
+    }
+
+    func clearVoicePrompt(for sessionId: String) {
+        sessions[sessionId]?.setPendingVoicePrompt(nil)
+    }
+
     func recordAssistantMessages(_ messages: [AssistantMessage], for sessionId: String) {
         guard let session = sessions[sessionId] else { return }
         session.recordAssistantMessages(messages)
@@ -131,12 +184,15 @@ final class SessionStore {
 
     private func getOrCreateSession(sessionId: String, cwd: String, isInteractive: Bool) -> SessionData {
         if let existing = sessions[sessionId] {
+            // Cancel pending auto-removal — session is active again
+            autoRemovalTasks[sessionId]?.cancel()
+            autoRemovalTasks.removeValue(forKey: sessionId)
             return existing
         }
 
         let projectName = (cwd as NSString).lastPathComponent
-        let sessionNumber = nextSessionNumberByProject[projectName, default: 0] + 1
-        nextSessionNumberByProject[projectName] = sessionNumber
+        let existingForProject = sessions.values.filter { $0.projectName == projectName }.count
+        let sessionNumber = existingForProject + 1
         let existingXPositions = sessions.values.map(\.spriteXPosition)
         let session = SessionData(sessionId: sessionId, cwd: cwd, sessionNumber: sessionNumber, isInteractive: isInteractive, existingXPositions: existingXPositions)
         sessions[sessionId] = session
@@ -170,20 +226,96 @@ final class SessionStore {
         schedulePersist()
     }
 
-    private static func parseQuestions(from toolInput: [String: AnyCodable]?) -> [PendingQuestion] {
-        guard let input = toolInput?.mapValues({ $0.value }),
-              let questions = input["questions"] as? [[String: Any]] else { return [] }
+    func resolvePermission(sessionId: String, decision: String, reason: String? = nil) {
+        guard let session = sessions[sessionId],
+              let pending = session.pendingResponse else { return }
 
-        return questions.compactMap { q in
-            guard let questionText = q["question"] as? String else { return nil }
-            let header = q["header"] as? String
-            let rawOptions = q["options"] as? [[String: Any]] ?? []
-            let options = rawOptions.compactMap { opt -> (label: String, description: String?)? in
+        var responseDict: [String: Any] = ["decision": decision]
+        if let reason { responseDict["reason"] = reason }
+
+        if let data = try? JSONSerialization.data(withJSONObject: responseDict) {
+            let fd = pending.clientSocket
+            DispatchQueue.global(qos: .userInitiated).async {
+                SocketServer.sendResponse(data, to: fd)
+            }
+        }
+
+        session.setPendingResponse(nil)
+        session.clearPendingQuestions()
+        if decision == "allow" {
+            session.updateTask(.working)
+        } else {
+            session.updateTask(.idle)
+        }
+        schedulePersist()
+    }
+
+    private var responseTimeoutTasks: [String: Task<Void, Never>] = [:]
+    private var autoRemovalTasks: [String: Task<Void, Never>] = [:]
+
+    private func scheduleResponseTimeout(sessionId: String) {
+        responseTimeoutTasks[sessionId]?.cancel()
+        responseTimeoutTasks[sessionId] = Task {
+            try? await Task.sleep(for: .seconds(85))
+            guard !Task.isCancelled else { return }
+            guard let session = sessions[sessionId],
+                  session.pendingResponse != nil else { return }
+            // Timed out — close socket, Claude Code falls through to terminal
+            if let pending = session.pendingResponse {
+                let fd = pending.clientSocket
+                DispatchQueue.global(qos: .utility).async { close(fd) }
+            }
+            session.setPendingResponse(nil)
+        }
+    }
+
+    private func scheduleAutoRemoval(sessionId: String, delay: Int) {
+        autoRemovalTasks[sessionId]?.cancel()
+        autoRemovalTasks[sessionId] = Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            // Only remove if still sleeping (not reactivated by a new hook)
+            guard let session = sessions[sessionId], session.task == .sleeping else { return }
+            dismissSession(sessionId)
+            autoRemovalTasks.removeValue(forKey: sessionId)
+        }
+    }
+
+    private static func parseQuestions(from toolInput: [String: AnyCodable]?) -> [PendingQuestion] {
+        guard let input = toolInput?.mapValues({ $0.value }) else { return [] }
+
+        // Format 1: Claude Code built-in — {"questions": [{"question": "...", "options": [{...}]}]}
+        if let questions = input["questions"] as? [[String: Any]] {
+            return questions.compactMap { q in
+                guard let questionText = q["question"] as? String else { return nil }
+                let header = q["header"] as? String
+                let options = parseOptions(from: q["options"])
+                return PendingQuestion(question: questionText, header: header, options: options)
+            }
+        }
+
+        // Format 2: MCP / Conductor — {"question": "...", "options": [...]}
+        if let questionText = input["question"] as? String {
+            let options = parseOptions(from: input["options"])
+            return [PendingQuestion(question: questionText, header: "Question", options: options)]
+        }
+
+        return []
+    }
+
+    private static func parseOptions(from raw: Any?) -> [(label: String, description: String?)] {
+        // Handle array of dicts: [{"label": "...", "description": "..."}]
+        if let dictOptions = raw as? [[String: Any]] {
+            return dictOptions.compactMap { opt in
                 guard let label = opt["label"] as? String else { return nil }
                 return (label: label, description: opt["description"] as? String)
             }
-            return PendingQuestion(question: questionText, header: header, options: options)
         }
+        // Handle array of strings: ["Option 1", "Option 2"]
+        if let stringOptions = raw as? [String] {
+            return stringOptions.map { (label: $0, description: nil) }
+        }
+        return []
     }
 
     private static let localSlashCommands: Set<String> = [
@@ -195,6 +327,60 @@ final class SessionStore {
         guard let prompt, prompt.hasPrefix("/") else { return false }
         let command = String(prompt.prefix(while: { !$0.isWhitespace }))
         return localSlashCommands.contains(command)
+    }
+
+    private static func isAskUserQuestion(_ tool: String?) -> Bool {
+        guard let tool else { return false }
+        return tool == "AskUserQuestion" || tool.hasSuffix("AskUserQuestion")
+    }
+
+    /// Tools that modify state and should prompt for user approval in restricted modes.
+    private static let permissionRequiredTools: Set<String> = [
+        "Write", "Edit", "Bash", "NotebookEdit",
+        "MultiEdit", "TodoWrite",
+    ]
+
+    /// Read-only tools that never need approval.
+    private static let safeTools: Set<String> = [
+        "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+        "LSP", "Agent", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+    ]
+
+    private static func needsPermissionApproval(tool: String?, permissionMode: String) -> Bool {
+        guard let tool else { return false }
+
+        // In permissive modes, never block
+        if permissionMode == "dontAsk" || permissionMode == "bypassPermissions" {
+            return false
+        }
+
+        // MCP tools (prefixed) — always prompt in plan/default mode
+        if tool.contains("__") && !isAskUserQuestion(tool) {
+            // MCP tool — prompt unless it's a known safe pattern
+            return permissionMode == "plan" || permissionMode == "default"
+        }
+
+        // Known safe tools — never prompt
+        if safeTools.contains(tool) { return false }
+
+        // Known dangerous tools — prompt in plan/default mode
+        if permissionRequiredTools.contains(tool) {
+            return permissionMode == "plan" || permissionMode == "default" || permissionMode == "acceptEdits"
+        }
+
+        // Unknown tools — prompt in plan mode only
+        return permissionMode == "plan"
+    }
+
+    private static func respondAllow(to clientSocket: Int32) {
+        let response: [String: Any] = ["decision": "allow"]
+        if let data = try? JSONSerialization.data(withJSONObject: response) {
+            DispatchQueue.global(qos: .userInitiated).async {
+                SocketServer.sendResponse(data, to: clientSocket)
+            }
+        } else {
+            DispatchQueue.global(qos: .utility).async { close(clientSocket) }
+        }
     }
 
     private static func buildPermissionQuestion(tool: String?, toolInput: [String: AnyCodable]?) -> PendingQuestion {
@@ -288,12 +474,7 @@ final class SessionStore {
             let session = SessionData(restoring: entry, existingXPositions: existingXPositions)
             sessions[entry.sessionId] = session
 
-            // Track session numbers for this project
-            let projectName = (entry.cwd as NSString).lastPathComponent
-            let current = nextSessionNumberByProject[projectName, default: 0]
-            if entry.sessionNumber > current {
-                nextSessionNumberByProject[projectName] = entry.sessionNumber
-            }
+            // Session numbers are now computed from active count, no need to track max
 
             if alive {
                 // Process still running — reset transient states to .idle so the
@@ -307,6 +488,13 @@ final class SessionStore {
                     session.updateTask(restoredTask)
                 }
             } else {
+                // Skip dead sessions older than 1 hour
+                let age = Date().timeIntervalSince(entry.lastActivity)
+                if age > 3600 {
+                    DiagLog.shared.write("SESSION: Expired #\(entry.sessionNumber) — inactive for \(Int(age))s")
+                    sessions.removeValue(forKey: entry.sessionId)
+                    continue
+                }
                 session.updateTask(.sleeping)
             }
 
@@ -320,6 +508,27 @@ final class SessionStore {
             // Auto-select if only one
             if sessions.count == 1 {
                 selectedSessionId = sessions.keys.first
+            }
+        }
+    }
+
+    func startLivenessPolling() {
+        Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { return }
+                for session in sessions.values {
+                    if let pid = session.pid {
+                        let alive = kill(Int32(pid), 0) == 0
+                        if !alive && session.task != .sleeping {
+                            session.updateTask(.sleeping)
+                            session.updateProcessingState(isProcessing: false)
+                            // Schedule removal — process is dead, no SessionEnd will arrive
+                            scheduleAutoRemoval(sessionId: session.id, delay: 30)
+                            schedulePersist()
+                        }
+                    }
+                }
             }
         }
     }
