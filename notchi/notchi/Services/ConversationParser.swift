@@ -1,6 +1,6 @@
 //
 //  ConversationParser.swift
-//  notchi
+//  rhythm
 //
 //  Parses Claude JSONL conversation files to extract assistant text messages.
 //  Uses incremental parsing to only read new lines since last sync.

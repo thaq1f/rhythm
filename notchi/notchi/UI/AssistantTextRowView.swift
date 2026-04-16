@@ -1,6 +1,6 @@
 //
 //  AssistantTextRowView.swift
-//  notchi
+//  rhythm
 //
 //  Displays assistant text messages as bullet-pointed items in the activity panel.
 //

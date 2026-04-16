@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Renders a live conversation with a spawned agent.
-/// Tool calls are rendered like Notchi's activity view (icon + name + status badge).
+/// Tool calls are rendered like Rhythm's activity view (icon + name + status badge).
 struct AgentConversationView: View {
     let agentSession: AgentSessionManager
     let voiceOrchestrator: VoiceOrchestrator
@@ -132,7 +132,7 @@ struct AgentConversationView: View {
         .padding(.vertical, 3)
     }
 
-    // MARK: - Tool Use (like Notchi's activity row)
+    // MARK: - Tool Use (like Rhythm's activity row)
 
     private func toolUseRow(name: String) -> some View {
         HStack(spacing: 6) {

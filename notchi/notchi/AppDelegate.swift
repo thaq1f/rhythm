@@ -3,7 +3,7 @@ import os.log
 import Sparkle
 import SwiftUI
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "AppDelegate")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "AppDelegate")
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         hostBundle: .main,
         delegate: self
     )
-    private lazy var updateUserDriver = NotchiUpdateUserDriver(
+    private lazy var updateUserDriver = RhythmUpdateUserDriver(
         standardUserDriver: standardUserDriver,
         shouldHandleUpdaterErrorsInline: { UpdateManager.shared.shouldHandleUpdaterErrorInline },
         didFinishCustomSession: { [weak self] in
@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         HookInstaller.installIfNeeded()
         SocketServer.shared.start { event, clientSocket in
             Task { @MainActor in
-                NotchiStateMachine.shared.handleEvent(event, clientSocket: clientSocket)
+                RhythmStateMachine.shared.handleEvent(event, clientSocket: clientSocket)
             }
         }
     }

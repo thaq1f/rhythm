@@ -2,7 +2,7 @@ import AppKit
 import Sparkle
 
 @MainActor
-final class NotchiUpdateUserDriver: NSObject, SPUUserDriver {
+final class RhythmUpdateUserDriver: NSObject, SPUUserDriver {
     private let standardUserDriver: SPUStandardUserDriver
     private let shouldHandleUpdaterErrorsInline: () -> Bool
     private let didFinishCustomSession: () -> Void

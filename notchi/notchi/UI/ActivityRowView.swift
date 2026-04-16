@@ -278,7 +278,7 @@ struct QuestionPromptView: View {
 }
 
 struct WorkingIndicatorView: View {
-    let state: NotchiState
+    let state: RhythmState
     @State private var dotCount = 1
     @State private var symbolPhase = 0
 

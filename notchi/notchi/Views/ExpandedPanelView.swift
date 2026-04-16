@@ -32,7 +32,7 @@ struct ExpandedPanelView: View {
         sessionStore.effectiveSession
     }
 
-    private var state: NotchiState {
+    private var state: RhythmState {
         effectiveSession?.state ?? .idle
     }
 

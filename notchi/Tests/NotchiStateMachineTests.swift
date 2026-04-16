@@ -3,7 +3,7 @@ import XCTest
 @testable import notchi
 
 @MainActor
-final class NotchiStateMachineTests: XCTestCase {
+final class RhythmStateMachineTests: XCTestCase {
     override func tearDown() async throws {
         let sessionIds = Array(SessionStore.shared.sessions.keys)
         sessionIds.forEach { SessionStore.shared.dismissSession($0) }
@@ -11,10 +11,10 @@ final class NotchiStateMachineTests: XCTestCase {
     }
 
     func testAssistantMessagesWakeIdleAndSleepingInteractiveSessionsWithActiveWatcher() {
-        let stateMachine = NotchiStateMachine.shared
+        let stateMachine = RhythmStateMachine.shared
         let result = ParseResult(messages: [makeAssistantMessage()], interrupted: false)
 
-        for initialTask in [NotchiTask.idle, .sleeping] {
+        for initialTask in [RhythmTask.idle, .sleeping] {
             let sessionId = "wake-\(initialTask.rawValue)-\(UUID().uuidString)"
             let session = makeInteractiveSession(sessionId: sessionId)
             session.updateTask(initialTask)
@@ -30,7 +30,7 @@ final class NotchiStateMachineTests: XCTestCase {
     }
 
     func testAssistantMessagesDoNotWakeIdleSessionAfterStopWithoutWatcher() {
-        let stateMachine = NotchiStateMachine.shared
+        let stateMachine = RhythmStateMachine.shared
         let sessionId = "stop-\(UUID().uuidString)"
         let session = makeInteractiveSession(sessionId: sessionId)
 
@@ -67,7 +67,7 @@ final class NotchiStateMachineTests: XCTestCase {
     ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
-            cwd: "/tmp",
+            cwd: "/tmp/test-project",
             event: event,
             status: status,
             pid: nil,
@@ -76,8 +76,10 @@ final class NotchiStateMachineTests: XCTestCase {
             toolInput: nil,
             toolUseId: nil,
             userPrompt: userPrompt,
+            result: nil,
             permissionMode: nil,
-            interactive: true
+            interactive: true,
+            needsResponse: nil
         )
     }
 }

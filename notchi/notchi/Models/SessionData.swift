@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "SessionData")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "SessionData")
 
 struct PendingQuestion {
     let question: String
@@ -28,10 +28,10 @@ final class SessionData: Identifiable {
     private(set) var pid: Int?
     private(set) var tty: String?
 
-    private(set) var task: NotchiTask = .idle
+    private(set) var task: RhythmTask = .idle
     let emotionState = EmotionState()
-    var state: NotchiState {
-        NotchiState(task: task, emotion: emotionState.currentEmotion)
+    var state: RhythmState {
+        RhythmState(task: task, emotion: emotionState.currentEmotion)
     }
     private(set) var isProcessing: Bool = false
     private(set) var lastActivity: Date
@@ -126,7 +126,7 @@ final class SessionData: Identifiable {
         return yOffsetBase - CGFloat(yBits % yOffsetRange)
     }
 
-    func updateTask(_ newTask: NotchiTask) {
+    func updateTask(_ newTask: RhythmTask) {
         task = newTask
         lastActivity = Date()
     }
@@ -310,6 +310,6 @@ final class SessionData: Identifiable {
         self.pid = persisted.pid
         self.lastUserPrompt = persisted.lastUserPrompt
         self.lastActivity = persisted.lastActivity
-        self.task = NotchiTask(rawValue: persisted.task ?? "") ?? .sleeping
+        self.task = RhythmTask(rawValue: persisted.task ?? "") ?? .sleeping
     }
 }

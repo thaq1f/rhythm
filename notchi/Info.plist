@@ -23,6 +23,6 @@
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Notchi uses the microphone for voice commands to interact with Claude Code sessions.</string>
+	<string>Rhythm uses the microphone for voice commands to interact with Claude Code sessions.</string>
 </dict>
 </plist>

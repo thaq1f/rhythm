@@ -1,7 +1,7 @@
 import AppKit
 import os.log
 
-private let panelLogger = Logger(subsystem: "com.ruban.notchi", category: "PanelManager")
+private let panelLogger = Logger(subsystem: "com.ruban.rhythm", category: "PanelManager")
 
 @MainActor
 @Observable
@@ -33,7 +33,7 @@ final class NotchPanelManager {
 
         let notchCenterX = screenFrame.origin.x + screenFrame.width / 2
         let sideWidth = max(0, newNotchSize.height - 12) + 24
-        // Match original Notchi: one side width
+        // Match original Rhythm: one side width
         let notchTotalWidth = newNotchSize.width + sideWidth
 
         notchRect = CGRect(

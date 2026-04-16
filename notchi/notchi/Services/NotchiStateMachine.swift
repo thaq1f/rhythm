@@ -1,12 +1,12 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "StateMachine")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "StateMachine")
 
 @MainActor
 @Observable
-final class NotchiStateMachine {
-    static let shared = NotchiStateMachine()
+final class RhythmStateMachine {
+    static let shared = RhythmStateMachine()
 
     let sessionStore = SessionStore.shared
 
@@ -18,7 +18,7 @@ final class NotchiStateMachine {
     private static let syncDebounce: Duration = .milliseconds(100)
     private static let waitingClearGuard: TimeInterval = 2.0
 
-    var currentState: NotchiState {
+    var currentState: RhythmState {
         sessionStore.effectiveSession?.state ?? .idle
     }
 

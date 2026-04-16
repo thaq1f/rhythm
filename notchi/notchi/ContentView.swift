@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  notchi
+//  rhythm
 //
 //  Created by Ruban on 2026-01-30.
 //

@@ -145,7 +145,7 @@ private struct SpriteTapTarget: View {
 }
 
 private struct GrassSpriteView: View {
-    let state: NotchiState
+    let state: RhythmState
     let xPosition: CGFloat
     let yOffset: CGFloat
     let totalWidth: CGFloat

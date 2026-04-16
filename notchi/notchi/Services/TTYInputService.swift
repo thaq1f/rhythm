@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import os.log
 
-private nonisolated(unsafe) let logger = Logger(subsystem: "com.ruban.notchi", category: "TTYInput")
+private nonisolated(unsafe) let logger = Logger(subsystem: "com.ruban.rhythm", category: "TTYInput")
 
 /// Injects text into a terminal tty using TIOCSTI via a Perl subprocess.
 ///
@@ -62,7 +62,7 @@ while (read(STDIN, my $c, 1)) {
             group.addTask {
                 // Timeout sentinel — kill the process and return failure after 6s.
                 try? await Task.sleep(for: .seconds(6))
-                DiagLog.shared.write("VOICE: TTY injection timed out after 6s")
+                await MainActor.run { DiagLog.shared.write("VOICE: TTY injection timed out after 6s") }
                 return false
             }
             let result = await group.next() ?? false
@@ -194,7 +194,7 @@ while (read(STDIN, my $c, 1)) {
             let title = (titleRef as? String) ?? ""
             if title.localizedCaseInsensitiveContains(text) {
                 AXUIElementPerformAction(element, kAXPressAction as CFString)
-                DiagLog.shared.write("TERMINAL: Switched to tab '\(title)' (matched '\(text)')")
+                Task { @MainActor in DiagLog.shared.write("TERMINAL: Switched to tab '\(title)' (matched '\(text)')") }
                 return
             }
         }

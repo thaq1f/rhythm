@@ -2,7 +2,7 @@ import Foundation
 import FluidAudio
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "Transcription")
+private let logger = Logger(subsystem: "com.ruban.rhythm", category: "Transcription")
 
 /// Local speech-to-text using FluidAudio's Parakeet TDT 0.6B v3 on Apple Neural Engine.
 /// Initialized eagerly at app launch so the model is ready before the first Fn press.
