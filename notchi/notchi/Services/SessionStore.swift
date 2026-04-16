@@ -477,9 +477,12 @@ final class SessionStore {
             // Session numbers are now computed from active count, no need to track max
 
             if alive {
-                // Process is still running — restore to idle so it wakes on next hook event
+                // Process still running — reset transient states to .idle so the
+                // session wakes on the next hook event. Covers sessions that went
+                // sleeping or compacting due to inactivity and were persisted that way.
                 let restoredTask = NotchiTask(rawValue: entry.task ?? "") ?? .idle
-                if restoredTask == .working || restoredTask == .waiting || restoredTask == .compacting || restoredTask == .sleeping {
+                if restoredTask == .working || restoredTask == .waiting
+                    || restoredTask == .compacting || restoredTask == .sleeping {
                     session.updateTask(.idle)
                 } else {
                     session.updateTask(restoredTask)
