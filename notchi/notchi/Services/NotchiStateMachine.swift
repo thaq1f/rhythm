@@ -26,8 +26,8 @@ final class NotchiStateMachine {
         startEmotionDecayTimer()
     }
 
-    func handleEvent(_ event: HookEvent) {
-        let session = sessionStore.process(event)
+    func handleEvent(_ event: HookEvent, clientSocket: Int32? = nil) {
+        let session = sessionStore.process(event, clientSocket: clientSocket)
         let isDone = event.status == "waiting_for_input"
 
         switch event.event {

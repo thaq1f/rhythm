@@ -93,9 +93,7 @@ final class VoiceCaptureService: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(qualityPreset.rawValue, forKey: "rhythm_audio_quality") }
     }
 
-    static let maxRecordingDuration: TimeInterval = 15 // seconds — prevents memory buildup + system hang
     private(set) var audioBuffers: [AVAudioPCMBuffer] = []
-    private var maxDurationTimer: Timer?
 
     private var captureSession: AVCaptureSession?
     private var audioOutput: AVCaptureAudioDataOutput?
@@ -262,16 +260,6 @@ final class VoiceCaptureService: NSObject, ObservableObject {
         audioBuffers.removeAll()
         isRecording = true  // Set immediately so caller sees it
 
-        // Auto-stop after max duration to prevent unbounded memory growth.
-        maxDurationTimer?.invalidate()
-        maxDurationTimer = Timer.scheduledTimer(withTimeInterval: Self.maxRecordingDuration, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.isRecording else { return }
-                DiagLog.shared.write("CAPTURE: Auto-stopping after \(Self.maxRecordingDuration)s max duration")
-                NotificationCenter.default.post(name: .voiceMaxDurationReached, object: nil)
-            }
-        }
-
         // Capture values needed off-main-thread
         let deviceID = selectedDeviceID
         let preset = qualityPreset
@@ -342,8 +330,6 @@ final class VoiceCaptureService: NSObject, ObservableObject {
 
     func stopRecording() -> URL? {
         guard isRecording else { return nil }
-        maxDurationTimer?.invalidate()
-        maxDurationTimer = nil
         let session = captureSession
         captureSession = nil
         audioOutput = nil

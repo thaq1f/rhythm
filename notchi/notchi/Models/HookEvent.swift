@@ -14,6 +14,7 @@ struct HookEvent: Decodable, Sendable {
     let result: String?      // assistant response text from Stop hook
     let permissionMode: String?
     let interactive: Bool?
+    let needsResponse: Bool?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -24,6 +25,7 @@ struct HookEvent: Decodable, Sendable {
         case result
         case permissionMode = "permission_mode"
         case interactive
+        case needsResponse = "needs_response"
     }
 }
 

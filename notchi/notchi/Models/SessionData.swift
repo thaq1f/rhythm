@@ -9,6 +9,12 @@ struct PendingQuestion {
     let options: [(label: String, description: String?)]
 }
 
+struct PendingResponse: Sendable {
+    let clientSocket: Int32
+    let eventType: String
+    let createdAt: Date = Date()
+}
+
 @MainActor
 @Observable
 final class SessionData: Identifiable {
@@ -36,6 +42,7 @@ final class SessionData: Identifiable {
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
     private(set) var pendingVoicePrompt: String?
+    private(set) var pendingResponse: PendingResponse?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -163,6 +170,15 @@ final class SessionData: Identifiable {
         if text != nil { lastActivity = Date() }
     }
 
+    func setPendingResponse(_ response: PendingResponse?) {
+        // Close previous socket if replacing
+        if let existing = pendingResponse, response != nil {
+            let fd = existing.clientSocket
+            DispatchQueue.global(qos: .utility).async { close(fd) }
+        }
+        pendingResponse = response
+    }
+
     func recordPreToolUse(tool: String?, toolInput: [String: Any]?, toolUseId: String?) {
         let description = SessionEvent.deriveDescription(tool: tool, toolInput: toolInput)
         let event = SessionEvent(
@@ -225,6 +241,11 @@ final class SessionData: Identifiable {
         durationTimer = nil
         sleepTimer?.cancel()
         sleepTimer = nil
+        if let pending = pendingResponse {
+            let fd = pending.clientSocket
+            DispatchQueue.global(qos: .utility).async { close(fd) }
+            pendingResponse = nil
+        }
         isProcessing = false
     }
 
@@ -261,6 +282,7 @@ final class SessionData: Identifiable {
         let lastUserPrompt: String?
         let pid: Int?
         let sessionStartTime: Date
+        let task: String?
     }
 
     func toPersisted() -> Persisted {
@@ -272,7 +294,8 @@ final class SessionData: Identifiable {
             lastActivity: lastActivity,
             lastUserPrompt: lastUserPrompt,
             pid: pid,
-            sessionStartTime: sessionStartTime
+            sessionStartTime: sessionStartTime,
+            task: task.rawValue
         )
     }
 
@@ -287,6 +310,6 @@ final class SessionData: Identifiable {
         self.pid = persisted.pid
         self.lastUserPrompt = persisted.lastUserPrompt
         self.lastActivity = persisted.lastActivity
-        self.task = .sleeping
+        self.task = NotchiTask(rawValue: persisted.task ?? "") ?? .sleeping
     }
 }

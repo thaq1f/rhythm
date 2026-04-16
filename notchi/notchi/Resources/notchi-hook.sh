@@ -1,5 +1,6 @@
 #!/bin/bash
 # Notchi Hook - forwards Claude Code events to Notchi app via Unix socket
+# Supports bidirectional communication for permission decisions via PreToolUse
 
 SOCKET_PATH="/tmp/notchi.sock"
 [ -S "$SOCKET_PATH" ] || exit 0
@@ -51,6 +52,14 @@ tty = os.environ.get('NOTCHI_TTY', '') or None
 pid_str = os.environ.get('NOTCHI_PID', '')
 pid = int(pid_str) if pid_str.isdigit() else None
 
+tool = input_data.get('tool_name', '')
+
+# PreToolUse is the ONLY blocking hook that supports allow/deny responses.
+# PermissionRequest is informational (non-blocking).
+# We ask the server to decide: respond immediately for safe tools,
+# or hold the connection for user approval on dangerous ones.
+needs_response = (hook_event == 'PreToolUse')
+
 output = {
     'session_id':      input_data.get('session_id', ''),
     'cwd':             input_data.get('cwd', ''),
@@ -60,6 +69,7 @@ output = {
     'tty':             tty,
     'interactive':     os.environ.get('NOTCHI_INTERACTIVE', 'true') == 'true',
     'permission_mode': input_data.get('permission_mode', 'default'),
+    'needs_response':  needs_response,
 }
 
 if hook_event == 'UserPromptSubmit':
@@ -72,7 +82,6 @@ if hook_event in ('Stop', 'SubagentStop'):
     if result:
         output['result'] = result
 
-tool = input_data.get('tool_name', '')
 if tool:
     output['tool'] = tool
 
@@ -84,11 +93,32 @@ tool_input = input_data.get('tool_input', {})
 if tool_input:
     output['tool_input'] = tool_input
 
+RESPONSE_TIMEOUT = 120  # seconds — generous timeout for user interaction
+
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(os.environ['NOTCHI_SOCK'])
     sock.sendall(json.dumps(output).encode())
-    sock.close()
+    sock.shutdown(socket.SHUT_WR)  # signal: done sending, keep open for response
+
+    if needs_response:
+        sock.settimeout(RESPONSE_TIMEOUT)
+        chunks = []
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        if chunks:
+            response = b''.join(chunks).decode()
+            # Print to stdout — Claude Code reads hook stdout for decisions
+            print(response)
+    else:
+        sock.close()
+except socket.timeout:
+    # User didn't respond in time; exit silently.
+    # Claude Code falls through to its default terminal prompt.
+    pass
 except Exception:
     pass
 PYEOF

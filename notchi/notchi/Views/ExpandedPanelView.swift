@@ -255,7 +255,27 @@ struct ExpandedPanelView: View {
 
                                 let questions = effectiveSession?.pendingQuestions ?? []
                                 if !questions.isEmpty {
-                                    QuestionPromptView(questions: questions)
+                                    QuestionPromptView(
+                                        questions: questions,
+                                        hasPendingResponse: effectiveSession?.pendingResponse != nil,
+                                        onOptionSelected: { label in
+                                            guard let sessionId = effectiveSession?.id else { return }
+                                            let decision: String
+                                            let reason: String?
+                                            switch label {
+                                            case "Yes", "Yes, and don't ask again":
+                                                decision = "allow"
+                                                reason = nil
+                                            case "No":
+                                                decision = "deny"
+                                                reason = "User denied from Rhythm"
+                                            default:
+                                                decision = "allow"
+                                                reason = nil
+                                            }
+                                            sessionStore.resolvePermission(sessionId: sessionId, decision: decision, reason: reason)
+                                        }
+                                    )
                                         .id("question-prompt")
                                 }
                             }
