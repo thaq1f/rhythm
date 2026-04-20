@@ -8,8 +8,8 @@ set -euo pipefail
 # =============================================================================
 
 # --- Configuration ---
-TEAM_ID="SXT98GH5HN"
-BUNDLE_ID="com.ruban.rhythm"
+TEAM_ID="UBRRN7KG3D"
+BUNDLE_ID="com.silca.rhythm"
 SCHEME="notchi"
 PROJECT_PATH="notchi/notchi.xcodeproj"
 APPCAST_OUTPUT="docs/appcast.xml"
@@ -18,7 +18,7 @@ WEBSITE_APPCAST_OUTPUT="website/public/appcast.xml"
 SIGNED_RELEASE_NOTES_DIR="website/release-notes-signed"
 
 # TODO: Set your notarytool keychain profile name.
-# Create one with: xcrun notarytool store-credentials "rhythm-notarize" --apple-id "you@example.com" --team-id "SXT98GH5HN"
+# Create one with: xcrun notarytool store-credentials "rhythm-notarize" --apple-id "you@example.com" --team-id "UBRRN7KG3D"
 NOTARYTOOL_PROFILE="rhythm-notarize"
 
 # Sparkle tools directory — override with SPARKLE_BIN_DIR env var.
@@ -294,7 +294,7 @@ cp "$APPCAST_OUTPUT" "$APPCAST_STAGING/" 2>/dev/null || true
 
 "$GENERATE_APPCAST" \
     --ed-key-file "$SPARKLE_KEY_FILE" \
-    --download-url-prefix "https://github.com/sk-ruban/rhythm/releases/download/v${VERSION}/" \
+    --download-url-prefix "https://github.com/thaq1f/rhythm/releases/download/v${VERSION}/" \
     --release-notes-url-prefix "https://updates.rhythm.app/sparkle-notes/" \
     -o "$APPCAST_OUTPUT" \
     "$APPCAST_STAGING"

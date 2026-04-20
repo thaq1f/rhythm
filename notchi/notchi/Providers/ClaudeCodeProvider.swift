@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.rhythm", category: "ClaudeCode")
+private let logger = Logger(subsystem: "com.silca.rhythm", category: "ClaudeCode")
 
 /// Spawns `claude -p` with `--output-format stream-json --include-partial-messages`
 /// for each prompt. Maintains conversation via `--session-id` + `-c`.

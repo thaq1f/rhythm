@@ -1,7 +1,7 @@
 import AppKit
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.rhythm", category: "VoiceKeys")
+private let logger = Logger(subsystem: "com.silca.rhythm", category: "VoiceKeys")
 
 /// Push-to-talk via multiple event sources.
 /// Primary: CGEvent tap for Fn/Globe key (requires Accessibility permission).

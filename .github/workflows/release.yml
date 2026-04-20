@@ -76,7 +76,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           RELEASE_NOTES_SOURCE="docs/release-notes/$VERSION.md"
-          RELEASE_NOTES_ASSET="$RUNNER_TEMP/Notchi-$VERSION.md"
+          RELEASE_NOTES_ASSET="$RUNNER_TEMP/Rhythm-$VERSION.md"
 
           if [ ! -f "$RELEASE_NOTES_SOURCE" ]; then
             echo "Missing release notes file: $RELEASE_NOTES_SOURCE"
@@ -145,12 +145,12 @@ jobs:
             -archivePath $RUNNER_TEMP/notchi.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Developer ID Application" \
-            DEVELOPMENT_TEAM=SXT98GH5HN
+            DEVELOPMENT_TEAM=UBRRN7KG3D
 
       - name: Export archive
         run: |
           /usr/libexec/PlistBuddy -c "Add :method string developer-id" $RUNNER_TEMP/export.plist
-          /usr/libexec/PlistBuddy -c "Add :teamID string SXT98GH5HN" $RUNNER_TEMP/export.plist
+          /usr/libexec/PlistBuddy -c "Add :teamID string UBRRN7KG3D" $RUNNER_TEMP/export.plist
 
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/notchi.xcarchive \
@@ -164,7 +164,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           ditto -c -k --keepParent \
-            "$RUNNER_TEMP/export/Notchi.app" \
+            "$RUNNER_TEMP/export/Rhythm.app" \
             "$RUNNER_TEMP/notchi-submit.zip"
 
           xcrun notarytool submit "$RUNNER_TEMP/notchi-submit.zip" \
@@ -173,7 +173,7 @@ jobs:
             --password "$APPLE_APP_PASSWORD" \
             --wait
 
-          xcrun stapler staple "$RUNNER_TEMP/export/Notchi.app"
+          xcrun stapler staple "$RUNNER_TEMP/export/Rhythm.app"
 
       - name: Create DMG
         env:
@@ -181,22 +181,22 @@ jobs:
         run: |
           DMG_DIR=$RUNNER_TEMP/dmg_staging
           mkdir -p "$DMG_DIR"
-          cp -R "$RUNNER_TEMP/export/Notchi.app" "$DMG_DIR/"
+          cp -R "$RUNNER_TEMP/export/Rhythm.app" "$DMG_DIR/"
           ln -s /Applications "$DMG_DIR/Applications"
-          hdiutil create -volname "Notchi" -srcfolder "$DMG_DIR" \
-            -ov -format UDZO "$RUNNER_TEMP/Notchi-$VERSION.dmg"
+          hdiutil create -volname "Rhythm" -srcfolder "$DMG_DIR" \
+            -ov -format UDZO "$RUNNER_TEMP/Rhythm-$VERSION.dmg"
 
       - name: Write DMG checksum
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          SHASUM=$(shasum -a 256 "$RUNNER_TEMP/Notchi-$VERSION.dmg" | awk '{print $1}')
-          printf '%s\n' "$SHASUM" > "$RUNNER_TEMP/Notchi-$VERSION.sha256"
+          SHASUM=$(shasum -a 256 "$RUNNER_TEMP/Rhythm-$VERSION.dmg" | awk '{print $1}')
+          printf '%s\n' "$SHASUM" > "$RUNNER_TEMP/Rhythm-$VERSION.sha256"
 
           {
             echo "## Release checksum"
             echo
-            echo "\`Notchi-$VERSION.dmg\` SHA-256:"
+            echo "\`Rhythm-$VERSION.dmg\` SHA-256:"
             echo "\`$SHASUM\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -213,7 +213,7 @@ jobs:
           SPARKLE_BIN_DIR: ${{ steps.sparkle.outputs.SPARKLE_BIN_DIR }}
         run: |
           "$SPARKLE_BIN_DIR/sign_update" --ed-key-file "$RUNNER_TEMP/sparkle_key" \
-            "$RUNNER_TEMP/Notchi-$VERSION.dmg"
+            "$RUNNER_TEMP/Rhythm-$VERSION.dmg"
 
       - name: Update appcast.xml
         env:
@@ -221,20 +221,20 @@ jobs:
           SPARKLE_BIN_DIR: ${{ steps.sparkle.outputs.SPARKLE_BIN_DIR }}
         run: |
           mkdir -p $RUNNER_TEMP/appcast_staging
-          cp "$RUNNER_TEMP/Notchi-$VERSION.dmg" $RUNNER_TEMP/appcast_staging/
-          cp "$RUNNER_TEMP/Notchi-$VERSION.md" $RUNNER_TEMP/appcast_staging/
+          cp "$RUNNER_TEMP/Rhythm-$VERSION.dmg" $RUNNER_TEMP/appcast_staging/
+          cp "$RUNNER_TEMP/Rhythm-$VERSION.md" $RUNNER_TEMP/appcast_staging/
           cp docs/appcast.xml $RUNNER_TEMP/appcast_staging/ 2>/dev/null || true
 
           "$SPARKLE_BIN_DIR/generate_appcast" \
             --ed-key-file "$RUNNER_TEMP/sparkle_key" \
-            --download-url-prefix "https://github.com/sk-ruban/notchi/releases/download/v$VERSION/" \
-            --release-notes-url-prefix "https://updates.notchi.app/sparkle-notes/" \
+            --download-url-prefix "https://github.com/thaq1f/rhythm/releases/download/v$VERSION/" \
+            --release-notes-url-prefix "https://updates.rhythm.app/sparkle-notes/" \
             -o docs/appcast.xml \
             $RUNNER_TEMP/appcast_staging
 
           mkdir -p website/release-notes-signed
-          cp "$RUNNER_TEMP/appcast_staging/Notchi-$VERSION.md" \
-            "website/release-notes-signed/Notchi-$VERSION.md"
+          cp "$RUNNER_TEMP/appcast_staging/Rhythm-$VERSION.md" \
+            "website/release-notes-signed/Rhythm-$VERSION.md"
 
       - name: Cleanup Sparkle key
         if: always()
@@ -244,10 +244,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.dmg
-            ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.sha256
-            ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.md
-          body_path: ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.md
+            ${{ runner.temp }}/Rhythm-${{ steps.version.outputs.VERSION }}.dmg
+            ${{ runner.temp }}/Rhythm-${{ steps.version.outputs.VERSION }}.sha256
+            ${{ runner.temp }}/Rhythm-${{ steps.version.outputs.VERSION }}.md
+          body_path: ${{ runner.temp }}/Rhythm-${{ steps.version.outputs.VERSION }}.md
 
       - name: Commit updated appcast
         env:
@@ -261,6 +261,6 @@ jobs:
           git pull origin main
           cp /tmp/appcast.xml docs/appcast.xml
           cp /tmp/appcast.xml website/public/appcast.xml
-          git add docs/appcast.xml website/public/appcast.xml website/release-notes-signed/Notchi-$VERSION.md
+          git add docs/appcast.xml website/public/appcast.xml website/release-notes-signed/Rhythm-$VERSION.md
           git diff --cached --quiet && echo "No appcast changes" || git commit -m "chore: update appcast for v$VERSION"
           git push origin main

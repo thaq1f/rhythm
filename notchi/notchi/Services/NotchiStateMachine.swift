@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.rhythm", category: "StateMachine")
+private let logger = Logger(subsystem: "com.silca.rhythm", category: "StateMachine")
 
 @MainActor
 @Observable
