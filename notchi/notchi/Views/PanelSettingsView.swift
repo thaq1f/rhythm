@@ -7,6 +7,8 @@ struct PanelSettingsView: View {
     @State private var hooksInstalled = HookInstaller.isInstalled()
     @State private var hooksError = false
     @State private var apiKeyInput = AppSettings.anthropicApiKey ?? ""
+    @State private var devicePickerExpanded = false
+    @State private var qualityPickerExpanded = false
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var voiceCapture = VoiceCaptureService.shared
     private var keyListener: VoiceKeyListener { VoiceKeyListener.shared }
@@ -66,89 +68,123 @@ struct PanelSettingsView: View {
                 .foregroundColor(TerminalColors.dimmedText)
                 .tracking(1)
 
-            // Device picker
+            // Device picker (collapsible)
             VStack(alignment: .leading, spacing: 6) {
-                SettingsRowView(icon: "waveform", title: "Input Device") {
-                    EmptyView()
-                }
-
-                ForEach(voiceCapture.devices) { device in
-                    Button(action: { voiceCapture.selectedDeviceID = device.id }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: device.icon)
-                                .font(.system(size: 11))
-                                .foregroundColor(TerminalColors.secondaryText)
-                                .frame(width: 16)
-
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(device.name)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(TerminalColors.primaryText)
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { devicePickerExpanded.toggle() } }) {
+                    SettingsRowView(icon: "waveform", title: "Input Device") {
+                        HStack(spacing: 6) {
+                            if !devicePickerExpanded, let selected = voiceCapture.devices.first(where: { $0.id == voiceCapture.selectedDeviceID }) {
+                                Text(selected.name)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(TerminalColors.secondaryText)
                                     .lineLimit(1)
-                                Text(device.transportLabel)
-                                    .font(.system(size: 9))
-                                    .foregroundColor(TerminalColors.dimmedText)
                             }
-
-                            Spacer()
-
-                            if voiceCapture.selectedDeviceID == device.id {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(TerminalColors.green)
-                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(TerminalColors.dimmedText)
+                                .rotationEffect(.degrees(devicePickerExpanded ? 90 : 0))
                         }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(
-                            voiceCapture.selectedDeviceID == device.id
-                                ? Color.white.opacity(0.06) : Color.clear
-                        )
-                        .cornerRadius(6)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
-                .padding(.leading, 20)
-            }
+                .buttonStyle(.plain)
 
-            // Quality preset
-            VStack(alignment: .leading, spacing: 6) {
-                SettingsRowView(icon: "tuningfork", title: "Audio Quality") {
-                    EmptyView()
-                }
+                if devicePickerExpanded {
+                    ForEach(voiceCapture.devices) { device in
+                        Button(action: { voiceCapture.selectedDeviceID = device.id }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: device.icon)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(TerminalColors.secondaryText)
+                                    .frame(width: 16)
 
-                HStack(spacing: 6) {
-                    ForEach(AudioQualityPreset.allCases) { preset in
-                        Button(action: { voiceCapture.qualityPreset = preset }) {
-                            VStack(spacing: 2) {
-                                Text(preset.rawValue)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(
-                                        voiceCapture.qualityPreset == preset
-                                            ? .white : TerminalColors.secondaryText
-                                    )
-                                Text("\(Int(preset.sampleRate / 1000))kHz")
-                                    .font(.system(size: 8, design: .monospaced))
-                                    .foregroundColor(TerminalColors.dimmedText)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(device.name)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(TerminalColors.primaryText)
+                                        .lineLimit(1)
+                                    Text(device.transportLabel)
+                                        .font(.system(size: 9))
+                                        .foregroundColor(TerminalColors.dimmedText)
+                                }
+
+                                Spacer()
+
+                                if voiceCapture.selectedDeviceID == device.id {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(TerminalColors.green)
+                                }
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
                             .background(
-                                voiceCapture.qualityPreset == preset
-                                    ? Color.white.opacity(0.1) : Color.white.opacity(0.04)
+                                voiceCapture.selectedDeviceID == device.id
+                                    ? Color.white.opacity(0.06) : Color.clear
                             )
                             .cornerRadius(6)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
-                }
-                .padding(.leading, 20)
-
-                Text(voiceCapture.qualityPreset.description)
-                    .font(.system(size: 9))
-                    .foregroundColor(TerminalColors.dimmedText)
                     .padding(.leading, 20)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+
+            // Quality preset (collapsible)
+            VStack(alignment: .leading, spacing: 6) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { qualityPickerExpanded.toggle() } }) {
+                    SettingsRowView(icon: "tuningfork", title: "Audio Quality") {
+                        HStack(spacing: 6) {
+                            if !qualityPickerExpanded {
+                                Text(voiceCapture.qualityPreset.rawValue)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(TerminalColors.secondaryText)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(TerminalColors.dimmedText)
+                                .rotationEffect(.degrees(qualityPickerExpanded ? 90 : 0))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if qualityPickerExpanded {
+                    HStack(spacing: 6) {
+                        ForEach(AudioQualityPreset.allCases) { preset in
+                            Button(action: { voiceCapture.qualityPreset = preset }) {
+                                VStack(spacing: 2) {
+                                    Text(preset.rawValue)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundColor(
+                                            voiceCapture.qualityPreset == preset
+                                                ? .white : TerminalColors.secondaryText
+                                        )
+                                    Text("\(Int(preset.sampleRate / 1000))kHz")
+                                        .font(.system(size: 8, design: .monospaced))
+                                        .foregroundColor(TerminalColors.dimmedText)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                                .background(
+                                    voiceCapture.qualityPreset == preset
+                                        ? Color.white.opacity(0.1) : Color.white.opacity(0.04)
+                                )
+                                .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.leading, 20)
+
+                    Text(voiceCapture.qualityPreset.description)
+                        .font(.system(size: 9))
+                        .foregroundColor(TerminalColors.dimmedText)
+                        .padding(.leading, 20)
+
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
 
             // Push to talk
@@ -193,9 +229,8 @@ struct PanelSettingsView: View {
             }
             .buttonStyle(.plain)
 
-            // Accessibility / Input Monitoring (required for Fn key)
-            Button(action: openInputMonitoringSettings) {
-                SettingsRowView(icon: "hand.raised", title: "Input Monitoring") {
+            Button(action: openAccessibilitySettings) {
+                SettingsRowView(icon: "hand.raised", title: "Accessibility") {
                     HStack(spacing: 6) {
                         statusBadge(
                             keyListener.hasAccessibility ? "Granted" : "Required for Fn",
@@ -212,7 +247,7 @@ struct PanelSettingsView: View {
             .buttonStyle(.plain)
 
             if !keyListener.hasAccessibility {
-                Text("Fn key push-to-talk requires Input Monitoring permission. Right ⌥ works without it.")
+                Text("Fn key push-to-talk requires Accessibility permission. Right ⌥ works without it.")
                     .font(.system(size: 10))
                     .foregroundColor(TerminalColors.dimmedText)
                     .padding(.leading, 20)
@@ -220,12 +255,8 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func openInputMonitoringSettings() {
-        // macOS 26+: new System Settings URL scheme
-        // macOS 14-15: x-apple.systempreferences scheme
-        // Try most-specific first, fall back to broader privacy pane.
+    private func openAccessibilitySettings() {
         let urls = [
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:com.apple.preference.security?Privacy",
         ]
