@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.rhythm", category: "ClaudeUsageService")
+private let logger = Logger(subsystem: "com.silca.rhythm", category: "ClaudeUsageService")
 
 enum ClaudeUsageRecoveryAction: Equatable {
     case none

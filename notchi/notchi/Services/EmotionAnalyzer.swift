@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.rhythm", category: "EmotionAnalyzer")
+private let logger = Logger(subsystem: "com.silca.rhythm", category: "EmotionAnalyzer")
 
 private struct ClaudeSettingsFile: Decodable {
     let env: [String: String]?

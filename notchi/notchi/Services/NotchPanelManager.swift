@@ -1,7 +1,7 @@
 import AppKit
 import os.log
 
-private let panelLogger = Logger(subsystem: "com.ruban.rhythm", category: "PanelManager")
+private let panelLogger = Logger(subsystem: "com.silca.rhythm", category: "PanelManager")
 
 @MainActor
 @Observable

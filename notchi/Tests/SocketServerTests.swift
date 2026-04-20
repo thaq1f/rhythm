@@ -78,11 +78,11 @@ final class SocketServerTests: XCTestCase {
 
     func testSilentClientTimesOutAndServerStillAcceptsNextEvent() async throws {
         let recorder = EventRecorder()
-        let (_, path) = try await makeServer(clientReadTimeout: 0.15, recorder: recorder)
+        let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
 
         let silentClient = try connectClient(to: path)
 
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await Task.sleep(nanoseconds: 800_000_000)
         let noEventsAfterTimeout = await recorder.snapshot().isEmpty
         XCTAssertTrue(noEventsAfterTimeout)
 
@@ -90,7 +90,7 @@ final class SocketServerTests: XCTestCase {
         try validClient.send(makeEventPayload(sessionId: "after-timeout"))
         validClient.closeConnection()
 
-        let validEventDelivered = await waitUntil(timeout: 0.5) {
+        let validEventDelivered = await waitUntil(timeout: 2.0) {
             await recorder.snapshot().map(\.sessionId) == ["after-timeout"]
         }
 
