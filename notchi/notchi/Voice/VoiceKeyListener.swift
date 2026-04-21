@@ -187,19 +187,25 @@ final class VoiceKeyListener {
     // MARK: - Shared hold state
 
     private func beginHold(source: HoldSource) {
-        guard !isHolding else { return }
+        guard !isHolding else {
+            DiagLog.shared.write("KEY: beginHold skipped — already holding (\(holdSource == .fn ? "Fn" : "Right ⌥"))")
+            return
+        }
         holdSource = source
         startHoldTimeout()
-        logger.debug("Hold started (source: \(source == .fn ? "Fn" : "Right ⌥", privacy: .public))")
+        DiagLog.shared.write("KEY: Hold STARTED (source: \(source == .fn ? "Fn" : "Right ⌥"))")
         onRecordStart?()
     }
 
     private func endHold() {
-        guard isHolding else { return }
+        guard isHolding else {
+            DiagLog.shared.write("KEY: endHold skipped — not holding")
+            return
+        }
         let src = holdSource
         holdSource = .none
         cancelHoldTimeout()
-        logger.debug("Hold ended (source: \(src == .fn ? "Fn" : "Right ⌥", privacy: .public))")
+        DiagLog.shared.write("KEY: Hold ENDED (source: \(src == .fn ? "Fn" : "Right ⌥"))")
         onRecordStop?()
     }
 
