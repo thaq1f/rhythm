@@ -200,9 +200,15 @@ final class AccessibilityService {
     /// unrelated apps (Telegram, Safari, etc.) that happened to be focused before
     /// the user hovered the notch.
     func pasteTextAndReturn(_ text: String, targetApp: NSRunningApplication?) {
-        guard isGranted else { requestPermission(); return }
+        guard isGranted else {
+            DiagLog.shared.write("ACCESSIBILITY: ❌ pasteAndReturn skipped — no accessibility permission")
+            requestPermission()
+            return
+        }
         let targetName = targetApp?.localizedName ?? targetApp?.bundleIdentifier ?? "unknown"
-        DiagLog.shared.write("ACCESSIBILITY: pasteAndReturn — target=\(targetName)")
+        let isActive = targetApp?.isActive ?? false
+        let isTerminated = targetApp?.isTerminated ?? true
+        DiagLog.shared.write("ACCESSIBILITY: pasteAndReturn — target=\(targetName), active=\(isActive), terminated=\(isTerminated), textLen=\(text.count)")
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -211,6 +217,9 @@ final class AccessibilityService {
             // Activate the specific app so its window becomes key before we paste.
             targetApp?.activate(options: .activateIgnoringOtherApps)
             try? await Task.sleep(for: .milliseconds(150))
+
+            let isNowActive = targetApp?.isActive ?? false
+            DiagLog.shared.write("ACCESSIBILITY: Pre-paste — target isActive=\(isNowActive)")
 
             let vKey: CGKeyCode = 9    // V
             let retKey: CGKeyCode = 36 // Return
@@ -224,16 +233,21 @@ final class AccessibilityService {
             try? await Task.sleep(for: .milliseconds(100))
             post(retKey, down: true)
             post(retKey, down: false)
-            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars + Return to \(targetName)")
+            let clipboardContent = NSPasteboard.general.string(forType: .string)
+            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars + Return to \(targetName) (clipboard verification: \(clipboardContent?.count ?? -1) chars)")
         }
     }
 
     /// Copies text to clipboard and simulates Cmd+V in the frontmost app.
     func pasteText(_ text: String) {
         guard isGranted else {
+            DiagLog.shared.write("ACCESSIBILITY: ❌ pasteText skipped — no accessibility permission")
             requestPermission()
             return
         }
+
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        DiagLog.shared.write("ACCESSIBILITY: pasteText — textLen=\(text.count), frontApp=\(frontApp?.localizedName ?? "nil")")
 
         // Copy to clipboard
         NSPasteboard.general.clearContents()
@@ -258,7 +272,8 @@ final class AccessibilityService {
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
 
-            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars via Cmd+V")
+            let clipboardContent = NSPasteboard.general.string(forType: .string)
+            DiagLog.shared.write("ACCESSIBILITY: Pasted \(text.count) chars via Cmd+V (clipboard verification: \(clipboardContent?.count ?? -1) chars)")
         }
     }
 }

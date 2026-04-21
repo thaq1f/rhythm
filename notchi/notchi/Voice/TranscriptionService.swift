@@ -50,25 +50,32 @@ actor TranscriptionService {
     /// Transcribe a 16kHz mono WAV file. Auto-initializes if not yet ready.
     func transcribe(_ audioURL: URL) async throws -> String {
         // Start warmup if not yet begun
-        if case .idle = state { await warmUp() }
+        if case .idle = state {
+            logger.info("Model idle — triggering warmup before transcription")
+            await warmUp()
+        }
 
         // If still loading (warmup started elsewhere), poll until done
         if case .loading = state {
+            logger.info("Model still loading — polling (up to 30s)")
             var waited = 0
             while case .loading = state, waited < 60 {
                 try await Task.sleep(for: .milliseconds(500))
                 waited += 1
             }
+            logger.info("Model loading poll finished after \(waited * 500)ms — state now: \(String(describing: self.state))")
         }
 
         guard let mgr = asrManager, case .ready = state else {
+            logger.error("Model not ready after waiting — state: \(String(describing: self.state))")
             throw TranscriptionError.notReady
         }
 
-        logger.info("Transcribing \(audioURL.lastPathComponent)")
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? -1
+        logger.info("Transcribing \(audioURL.lastPathComponent) (\(fileSize) bytes)")
         let result = try await mgr.transcribe(audioURL, source: .microphone)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        logger.info("Transcribed \(text.count) chars")
+        logger.info("Transcribed \(text.count) chars: \"\(String(text.prefix(60)))\"")
         return text
     }
 

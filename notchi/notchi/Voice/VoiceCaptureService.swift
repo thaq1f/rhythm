@@ -102,6 +102,12 @@ final class VoiceCaptureService: NSObject, ObservableObject {
     private var levelSmoothingFactor: Float = 0.3
     private var deviceObserver: NSObjectProtocol?
 
+    // Lock-protected state for cross-queue synchronization.
+    // captureOutput() appends buffers on captureQueue; stopRecording() drains on main actor.
+    private let captureLock = NSLock()
+    nonisolated(unsafe) private var captureQueueBuffers: [AVAudioPCMBuffer] = []
+    nonisolated(unsafe) private var activeSession: AVCaptureSession?
+
     private override init() {
         super.init()
 
@@ -251,21 +257,32 @@ final class VoiceCaptureService: NSObject, ObservableObject {
     // MARK: - Recording
 
     func startRecording() {
-        guard !isRecording else { return }
+        guard !isRecording else {
+            DiagLog.shared.write("CAPTURE: startRecording() skipped — already recording")
+            return
+        }
         guard hasPermission else {
             logger.warning("No microphone permission")
+            DiagLog.shared.write("CAPTURE: startRecording() skipped — no permission")
             return
         }
 
         audioBuffers.removeAll()
         isRecording = true  // Set immediately so caller sees it
+        tempFileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rhythm-\(UUID().uuidString).wav")
+
+        captureLock.lock()
+        captureQueueBuffers.removeAll()
+        activeSession = nil
+        captureLock.unlock()
 
         // Capture values needed off-main-thread
         let deviceID = selectedDeviceID
         let preset = qualityPreset
         let queue = captureQueue
 
-        DiagLog.shared.write("CAPTURE: Starting (device=\(deviceID ?? "default"), preset=\(preset.rawValue))")
+        DiagLog.shared.write("CAPTURE: Starting (device=\(deviceID ?? "default"), preset=\(preset.rawValue), tempURL=\(tempFileURL!.lastPathComponent))")
 
         // ALL AVCaptureSession work happens off the main thread.
         // addInput/addOutput/startRunning can all block — never call on main queue.
@@ -302,6 +319,10 @@ final class VoiceCaptureService: NSObject, ObservableObject {
                 // Use device native format — resampled to 16kHz mono via resampleBuffers()
                 if session.canAddOutput(output) { session.addOutput(output) }
 
+                self?.captureLock.lock()
+                self?.activeSession = session
+                self?.captureLock.unlock()
+
                 session.startRunning()
                 let running = session.isRunning
                 let name = audioDevice.localizedName
@@ -311,8 +332,6 @@ final class VoiceCaptureService: NSObject, ObservableObject {
                     if running {
                         self.captureSession = session
                         self.audioOutput = output
-                        self.tempFileURL = FileManager.default.temporaryDirectory
-                            .appendingPathComponent("rhythm-\(UUID().uuidString).wav")
                         DiagLog.shared.write("CAPTURE: ✅ Running (\(name) @ \(preset.rawValue))")
                     } else {
                         self.isRecording = false
@@ -329,23 +348,41 @@ final class VoiceCaptureService: NSObject, ObservableObject {
     }
 
     func stopRecording() -> URL? {
-        guard isRecording else { return nil }
-        let session = captureSession
+        captureLock.lock()
+        let lockBufferCount = captureQueueBuffers.count
+        captureLock.unlock()
+        DiagLog.shared.write("CAPTURE: stopRecording() called — isRecording=\(isRecording), hasSession=\(captureSession != nil), mainBuffers=\(audioBuffers.count), lockBuffers=\(lockBufferCount), tempURL=\(tempFileURL?.lastPathComponent ?? "nil")")
+        guard isRecording else {
+            DiagLog.shared.write("CAPTURE: stopRecording() — not recording, returning nil")
+            return nil
+        }
+
+        // Read session from lock-protected reference (always set before startRunning).
+        // Fall back to captureSession for the rare case where the setup Task already ran.
+        captureLock.lock()
+        let session = activeSession ?? captureSession
+        activeSession = nil
+        let buffers = captureQueueBuffers
+        captureQueueBuffers.removeAll()
+        captureLock.unlock()
+
         captureSession = nil
         audioOutput = nil
         isRecording = false
         audioLevel = 0
         audioDB = -60
+        audioBuffers.removeAll()
         captureQueue.async { session?.stopRunning() }
 
-        // Grab buffers and clear immediately to free memory.
-        let buffers = audioBuffers
-        audioBuffers.removeAll()
-        guard !buffers.isEmpty, let fileURL = tempFileURL else { return nil }
+        guard !buffers.isEmpty, let fileURL = tempFileURL else {
+            DiagLog.shared.write("CAPTURE: ⚠️ stopRecording() — buffers empty (\(buffers.count)) or no tempURL (\(tempFileURL?.lastPathComponent ?? "nil")) — returning nil")
+            return nil
+        }
 
         // Stash buffers for async resampling — caller uses resampleBuffers() off main thread.
         pendingResampleBuffers = buffers
         pendingResampleURL = fileURL
+        DiagLog.shared.write("CAPTURE: stopRecording() — stashed \(buffers.count) buffers for resample")
         return fileURL
     }
 
@@ -371,14 +408,23 @@ final class VoiceCaptureService: NSObject, ObservableObject {
 
     /// Consume pending buffers and URL from the last stopRecording() call.
     func consumePendingResample() -> (url: URL, buffers: [AVAudioPCMBuffer])? {
-        guard let url = pendingResampleURL, let buffers = pendingResampleBuffers else { return nil }
+        guard let url = pendingResampleURL, let buffers = pendingResampleBuffers else {
+            DiagLog.shared.write("CAPTURE: consumePendingResample() — nothing pending (url=\(pendingResampleURL?.lastPathComponent ?? "nil"), buffers=\(pendingResampleBuffers?.count ?? -1))")
+            return nil
+        }
         pendingResampleBuffers = nil
         pendingResampleURL = nil
+        DiagLog.shared.write("CAPTURE: consumePendingResample() — returning \(buffers.count) buffers")
         return (url, buffers)
     }
 
     func cancelRecording() {
-        let session = captureSession
+        captureLock.lock()
+        let session = activeSession ?? captureSession
+        activeSession = nil
+        captureQueueBuffers.removeAll()
+        captureLock.unlock()
+
         captureSession = nil
         audioOutput = nil
         isRecording = false
@@ -469,8 +515,21 @@ extension VoiceCaptureService: AVCaptureAudioDataOutputSampleBufferDelegate {
             memcpy(channelData[0], data, min(length, Int(pcmBuffer.frameCapacity) * MemoryLayout<Float>.size))
         }
 
+        captureLock.lock()
+        let wasEmpty = captureQueueBuffers.isEmpty
+        captureQueueBuffers.append(pcmBuffer)
+        captureLock.unlock()
+
         Task { @MainActor in
             self.audioBuffers.append(pcmBuffer)
+            if wasEmpty {
+                let fmtFlags = asbd.mFormatFlags
+                let bitsPerCh = asbd.mBitsPerChannel
+                let isFloat = (fmtFlags & kAudioFormatFlagIsFloat) != 0
+                let isPacked = (fmtFlags & kAudioFormatFlagIsPacked) != 0
+                let isInterleaved = (fmtFlags & kAudioFormatFlagIsNonInterleaved) == 0
+                DiagLog.shared.write("CAPTURE: First buffer — rate=\(asbd.mSampleRate) ch=\(asbd.mChannelsPerFrame) bits=\(bitsPerCh) float=\(isFloat) packed=\(isPacked) interleaved=\(isInterleaved) flags=0x\(String(fmtFlags, radix: 16)) frames=\(pcmBuffer.frameLength) dataBytes=\(length)")
+            }
         }
     }
 }

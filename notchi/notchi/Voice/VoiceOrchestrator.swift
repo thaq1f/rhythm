@@ -166,10 +166,10 @@ final class VoiceOrchestrator {
     // MARK: - Record Stop
 
     private func handleRecordStop() {
-        DiagLog.shared.write("VOICE: handleRecordStop called (isRecording=\(isRecording))")
+        DiagLog.shared.write("VOICE: handleRecordStop called (isRecording=\(isRecording), captureIsRecording=\(capture.isRecording), captureBuffers=\(capture.audioBuffers.count))")
         stopDurationTimer()
         guard isRecording else {
-            // Key released but we weren't recording — ensure clean state
+            DiagLog.shared.write("VOICE: handleRecordStop — not recording, skipping (state=\(presentationState.currentState))")
             if presentationState.currentState != .idle {
                 presentationState.reset()
             }
@@ -180,17 +180,23 @@ final class VoiceOrchestrator {
         presentationState.currentState = .processing(hint: isModelReady ? "transcribing…" : "loading model…")
 
         // stopRecording() now just grabs buffers without resampling.
-        _ = capture.stopRecording()
+        let stopURL = capture.stopRecording()
+        DiagLog.shared.write("VOICE: stopRecording returned URL=\(stopURL?.lastPathComponent ?? "nil")")
         let pending = capture.consumePendingResample()
+        DiagLog.shared.write("VOICE: consumePendingResample returned \(pending == nil ? "nil" : "\(pending!.buffers.count) buffers")")
         processRecording(pendingResample: pending, originApp: recordingOriginApp)
     }
 
     private func processRecording(pendingResample: (url: URL, buffers: [AVAudioPCMBuffer])?, originApp: NSRunningApplication?) {
-        processingTask?.cancel()
+        if let existing = processingTask {
+            DiagLog.shared.write("VOICE: Cancelling previous processingTask before starting new one")
+            existing.cancel()
+        }
         // Capture routing state synchronously at Fn-UP, before any async gap.
         let panelWasOpen = NotchPanelManager.shared.isExpanded
         let capturedSession = SessionStore.shared.effectiveSession
         let pipelineStart = ContinuousClock.now
+        DiagLog.shared.write("VOICE: processRecording — pendingResample=\(pendingResample == nil ? "nil" : "\(pendingResample!.buffers.count) buffers"), panelOpen=\(panelWasOpen), session=\(capturedSession?.projectName ?? "nil"), originApp=\(originApp?.localizedName ?? "nil")")
         processingTask = Task {
             // Resample off main thread if we have pending buffers.
             let audioURL: URL?
@@ -200,15 +206,21 @@ final class VoiceOrchestrator {
                     self.capture.resampleBuffers(to: pendingResample.url, buffers: pendingResample.buffers)
                 }.value
                 let resampleMs = (ContinuousClock.now - resampleStart).ms
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: pendingResample.url.path)[.size] as? Int) ?? -1
                 logger.info("⏱ resample: \(resampleMs)ms")
-                DiagLog.shared.write("PERF: resample=\(resampleMs)ms")
+                DiagLog.shared.write("PERF: resample=\(resampleMs)ms buffers=\(pendingResample.buffers.count) wavSize=\(fileSize)bytes success=\(success)")
                 audioURL = success ? pendingResample.url : nil
             } else {
                 audioURL = nil
             }
 
+            guard !Task.isCancelled else {
+                DiagLog.shared.write("VOICE: ⚠️ Task cancelled after resample step")
+                return
+            }
+
             guard let audioURL else {
-                DiagLog.shared.write("VOICE: No audio URL, resetting")
+                DiagLog.shared.write("VOICE: ❌ No audio URL (resample failed or no buffers), resetting")
                 presentationState.reset()
                 return
             }
@@ -235,6 +247,13 @@ final class VoiceOrchestrator {
 
                 // Clean up temp audio file
                 try? FileManager.default.removeItem(at: audioURL)
+
+                DiagLog.shared.write("VOICE: Transcript received (\(transcript.count) chars): \"\(String(transcript.prefix(80)))\"")
+
+                guard !Task.isCancelled else {
+                    DiagLog.shared.write("VOICE: ⚠️ Task cancelled after transcription")
+                    return
+                }
 
                 guard !transcript.isEmpty else {
                     DiagLog.shared.write("VOICE: Empty transcript, resetting")
@@ -316,6 +335,7 @@ final class VoiceOrchestrator {
                     AccessibilityService.shared.pasteText(transcript)
                 }
 
+                DiagLog.shared.write("VOICE: ✅ Pipeline complete — setting .success state")
                 presentationState.currentState = .success
                 try? await Task.sleep(for: .seconds(0.6))
                 presentationState.reset()
