@@ -14,6 +14,8 @@ final class VoiceOrchestrator {
 
     let presentationState = VoicePresentationState()
 
+    private(set) var isModelReady = false
+
     private let capture = VoiceCaptureService.shared
     private let keyListener = VoiceKeyListener.shared
     private var durationTimer: Timer?
@@ -22,6 +24,7 @@ final class VoiceOrchestrator {
     private var permissionGranted: Bool?  // nil = unchecked
     private var processingTask: Task<Void, Never>?
     private var recordingOriginApp: NSRunningApplication?
+    private var warmupTask: Task<Void, Never>?
 
     private init() {
         wireKeyListener()
@@ -48,7 +51,15 @@ final class VoiceOrchestrator {
         }
 
         // Start loading Parakeet model in background so it's ready for first Fn press
-        Task { await TranscriptionService.shared.warmUp() }
+        warmupTask = Task {
+            presentationState.currentState = .processing(hint: "preparing voice…")
+            await TranscriptionService.shared.warmUp()
+            isModelReady = await TranscriptionService.shared.isReady
+            if presentationState.currentState == .processing(hint: "preparing voice…") {
+                presentationState.reset()
+            }
+            warmupTask = nil
+        }
 
         logger.info("Voice orchestrator started (mic: \(String(describing: self.permissionGranted)))")
     }
@@ -166,18 +177,36 @@ final class VoiceOrchestrator {
         }
         isRecording = false
 
-        presentationState.currentState = .processing(hint: "transcribing…")
+        presentationState.currentState = .processing(hint: isModelReady ? "transcribing…" : "loading model…")
 
-        let audioURL = capture.stopRecording()
-        processRecording(audioURL: audioURL, originApp: recordingOriginApp)
+        // stopRecording() now just grabs buffers without resampling.
+        _ = capture.stopRecording()
+        let pending = capture.consumePendingResample()
+        processRecording(pendingResample: pending, originApp: recordingOriginApp)
     }
 
-    private func processRecording(audioURL: URL?, originApp: NSRunningApplication?) {
+    private func processRecording(pendingResample: (url: URL, buffers: [AVAudioPCMBuffer])?, originApp: NSRunningApplication?) {
         processingTask?.cancel()
         // Capture routing state synchronously at Fn-UP, before any async gap.
         let panelWasOpen = NotchPanelManager.shared.isExpanded
         let capturedSession = SessionStore.shared.effectiveSession
+        let pipelineStart = ContinuousClock.now
         processingTask = Task {
+            // Resample off main thread if we have pending buffers.
+            let audioURL: URL?
+            if let pendingResample {
+                let resampleStart = ContinuousClock.now
+                let success = await Task.detached(priority: .userInitiated) {
+                    self.capture.resampleBuffers(to: pendingResample.url, buffers: pendingResample.buffers)
+                }.value
+                let resampleMs = (ContinuousClock.now - resampleStart).ms
+                logger.info("⏱ resample: \(resampleMs)ms")
+                DiagLog.shared.write("PERF: resample=\(resampleMs)ms")
+                audioURL = success ? pendingResample.url : nil
+            } else {
+                audioURL = nil
+            }
+
             guard let audioURL else {
                 DiagLog.shared.write("VOICE: No audio URL, resetting")
                 presentationState.reset()
@@ -194,9 +223,15 @@ final class VoiceOrchestrator {
                 }
             }
             do {
+                let transcribeStart = ContinuousClock.now
                 let transcript = try await TranscriptionService.shared.transcribe(audioURL)
+                let transcribeMs = (ContinuousClock.now - transcribeStart).ms
+                let totalMs = (ContinuousClock.now - pipelineStart).ms
+                logger.info("⏱ transcribe: \(transcribeMs)ms, total: \(totalMs)ms")
+                DiagLog.shared.write("PERF: transcribe=\(transcribeMs)ms total=\(totalMs)ms")
                 hintTask?.cancel()
                 hintTask = nil
+                self.isModelReady = true
 
                 // Clean up temp audio file
                 try? FileManager.default.removeItem(at: audioURL)

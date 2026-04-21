@@ -299,7 +299,7 @@ final class VoiceCaptureService: NSObject, ObservableObject {
 
                 let output = AVCaptureAudioDataOutput()
                 output.setSampleBufferDelegate(self, queue: queue)
-                // Use device native format — resampled to 16kHz mono in stopRecording()
+                // Use device native format — resampled to 16kHz mono via resampleBuffers()
                 if session.canAddOutput(output) { session.addOutput(output) }
 
                 session.startRunning()
@@ -343,8 +343,17 @@ final class VoiceCaptureService: NSObject, ObservableObject {
         audioBuffers.removeAll()
         guard !buffers.isEmpty, let fileURL = tempFileURL else { return nil }
 
-        // Resample synchronously but with the data already captured.
-        // This runs on the main actor but with bounded data (max 15s).
+        // Stash buffers for async resampling — caller uses resampleBuffers() off main thread.
+        pendingResampleBuffers = buffers
+        pendingResampleURL = fileURL
+        return fileURL
+    }
+
+    private var pendingResampleBuffers: [AVAudioPCMBuffer]?
+    private var pendingResampleURL: URL?
+
+    /// Resample captured audio to 16kHz mono WAV. Call from a background context after stopRecording().
+    nonisolated func resampleBuffers(to fileURL: URL, buffers: [AVAudioPCMBuffer]) -> Bool {
         do {
             let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
             let outputFile = try AVAudioFile(forWriting: fileURL, settings: outputFormat.settings)
@@ -353,11 +362,19 @@ final class VoiceCaptureService: NSObject, ObservableObject {
                     try outputFile.write(from: converted)
                 }
             }
-            return fileURL
+            return true
         } catch {
             logger.error("Failed to write audio: \(error.localizedDescription)")
-            return nil
+            return false
         }
+    }
+
+    /// Consume pending buffers and URL from the last stopRecording() call.
+    func consumePendingResample() -> (url: URL, buffers: [AVAudioPCMBuffer])? {
+        guard let url = pendingResampleURL, let buffers = pendingResampleBuffers else { return nil }
+        pendingResampleBuffers = nil
+        pendingResampleURL = nil
+        return (url, buffers)
     }
 
     func cancelRecording() {
@@ -373,7 +390,7 @@ final class VoiceCaptureService: NSObject, ObservableObject {
 
     // MARK: - Resampling
 
-    private func resample(buffer: AVAudioPCMBuffer, to targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
+    private nonisolated func resample(buffer: AVAudioPCMBuffer, to targetFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
         // Skip if already in target format
         if buffer.format.sampleRate == targetFormat.sampleRate
             && buffer.format.channelCount == targetFormat.channelCount {

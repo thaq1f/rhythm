@@ -94,13 +94,18 @@ final class EmotionAnalyzer {
 
     private init() {}
 
-    func analyze(_ prompt: String) async -> (emotion: String, intensity: Double) {
-        let start = ContinuousClock.now
+    private static let minPromptLength = 8
 
-        guard let config = resolveAPIConfig() else {
-            logger.info("No emotion analysis configuration available, using neutral fallback")
+    func analyze(_ prompt: String) async -> (emotion: String, intensity: Double) {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < Self.minPromptLength || trimmed.hasPrefix("/") {
             return ("neutral", 0.0)
         }
+
+        guard let config = resolveAPIConfig() else {
+            return ("neutral", 0.0)
+        }
+        let start = ContinuousClock.now
 
         do {
             let result = try await callHaiku(
