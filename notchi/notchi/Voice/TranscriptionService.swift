@@ -18,6 +18,9 @@ actor TranscriptionService {
     /// True while the model is downloading or initializing.
     var isModelLoading: Bool { if case .loading = state { return true }; return false }
 
+    /// True when the model is loaded and ready to transcribe.
+    var isReady: Bool { if case .ready = state { return true }; return false }
+
     /// Download model (~600MB first time) and load onto ANE. Safe to call multiple times.
     func warmUp() async {
         guard case .idle = state else { return }
@@ -26,6 +29,7 @@ actor TranscriptionService {
         defer { isInitializing = false }
 
         state = .loading
+        let warmupStart = ContinuousClock.now
         logger.info("Warming up Parakeet TDT v3…")
 
         do {
@@ -34,7 +38,8 @@ actor TranscriptionService {
             try await mgr.initialize(models: models)
             asrManager = mgr          // only set after successful init
             state = .ready
-            logger.info("Parakeet ready")
+            let warmupMs = (ContinuousClock.now - warmupStart).ms
+            logger.info("⏱ model warmup: \(warmupMs)ms")
         } catch {
             let msg = error.localizedDescription
             state = .failed(msg)

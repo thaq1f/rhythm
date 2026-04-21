@@ -21,6 +21,12 @@ actor ConversationParser {
 
     private static let emptyResult = ParseResult(messages: [], interrupted: false)
 
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     /// Parse only NEW assistant text messages since last call
     func parseIncremental(sessionId: String, cwd: String) -> ParseResult {
         let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
@@ -97,9 +103,7 @@ actor ConversationParser {
             // Parse timestamp
             let timestamp: Date
             if let timestampStr = json["timestamp"] as? String {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                timestamp = formatter.date(from: timestampStr) ?? Date()
+                timestamp = Self.dateFormatter.date(from: timestampStr) ?? Date()
             } else {
                 timestamp = Date()
             }
