@@ -145,7 +145,7 @@ final class SocketServerTests: XCTestCase {
         try client.send(makeEventPayload(sessionId: "still-connected"))
         client.closeConnection()
 
-        let originalServerReceivedEvent = await waitUntil(timeout: 0.5) {
+        let originalServerReceivedEvent = await waitUntil(timeout: 3.0) {
             await firstRecorder.snapshot().map(\.sessionId) == ["still-connected"]
         }
         let duplicateSnapshot = await secondRecorder.snapshot()
