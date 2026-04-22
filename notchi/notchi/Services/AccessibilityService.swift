@@ -249,15 +249,13 @@ final class AccessibilityService {
         let frontApp = NSWorkspace.shared.frontmostApplication
         DiagLog.shared.write("ACCESSIBILITY: pasteText — textLen=\(text.count), frontApp=\(frontApp?.localizedName ?? "nil")")
 
-        // Copy to clipboard
+        // Append trailing space so consecutive transcriptions don't run together
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.setString(text + " ", forType: .string)
 
-        // Small delay to ensure clipboard is ready
         Task {
             try? await Task.sleep(for: .milliseconds(50))
 
-            // Simulate Cmd+V: keycode 9 = V key
             let vKeyCode: CGKeyCode = 9
 
             guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: vKeyCode, keyDown: true),
