@@ -494,26 +494,65 @@ extension VoiceCaptureService: AVCaptureAudioDataOutputSampleBufferDelegate {
         processLevel(from: sampleBuffer)
 
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee,
-              let avFormat = AVAudioFormat(
-                  commonFormat: .pcmFormatFloat32,
-                  sampleRate: asbd.mSampleRate,
-                  channels: AVAudioChannelCount(asbd.mChannelsPerFrame),
-                  interleaved: asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
-              )
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee
         else { return }
 
         let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
-        guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: avFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
-        pcmBuffer.frameLength = AVAudioFrameCount(frameCount)
+        guard frameCount > 0 else { return }
 
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         var length = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
         CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
-        if let data = dataPointer, let channelData = pcmBuffer.floatChannelData {
-            memcpy(channelData[0], data, min(length, Int(pcmBuffer.frameCapacity) * MemoryLayout<Float>.size))
+        guard let data = dataPointer, length > 0 else { return }
+
+        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let isNonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let channels = AVAudioChannelCount(asbd.mChannelsPerFrame)
+
+        // Target format: float32, non-interleaved (what AVAudioPCMBuffer.floatChannelData expects)
+        let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: asbd.mSampleRate,
+            channels: channels,
+            interleaved: false
+        )!
+
+        // Always convert from the device's native format via AVAudioConverter
+        // to handle any mic (USB, Bluetooth, built-in) regardless of bit depth or layout.
+        let nativeFormat = AVAudioFormat(cmAudioFormatDescription: formatDesc)
+        guard let nativeBuf = AVAudioPCMBuffer(pcmFormat: nativeFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
+        nativeBuf.frameLength = AVAudioFrameCount(frameCount)
+
+        if nativeFormat.isInterleaved {
+            if let dest = nativeBuf.audioBufferList.pointee.mBuffers.mData {
+                memcpy(dest, data, min(length, Int(nativeBuf.audioBufferList.pointee.mBuffers.mDataByteSize)))
+            }
+        } else {
+            let ablPointer = UnsafeMutableAudioBufferListPointer(nativeBuf.mutableAudioBufferList)
+            var offset = 0
+            for i in 0..<Int(channels) where i < ablPointer.count {
+                if let dest = ablPointer[i].mData {
+                    let copyLen = min(length - offset, Int(ablPointer[i].mDataByteSize))
+                    guard copyLen > 0 else { break }
+                    memcpy(dest, data.advanced(by: offset), copyLen)
+                    offset += copyLen
+                }
+            }
         }
+
+        guard let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else { return }
+        guard let outputBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: AVAudioFrameCount(frameCount)) else { return }
+        var error: NSError?
+        var consumed = false
+        converter.convert(to: outputBuf, error: &error) { _, outStatus in
+            if consumed { outStatus.pointee = .noDataNow; return nil }
+            consumed = true
+            outStatus.pointee = .haveData
+            return nativeBuf
+        }
+        guard error == nil, outputBuf.frameLength > 0 else { return }
+        let pcmBuffer = outputBuf
 
         captureLock.lock()
         let wasEmpty = captureQueueBuffers.isEmpty
@@ -525,9 +564,8 @@ extension VoiceCaptureService: AVCaptureAudioDataOutputSampleBufferDelegate {
             if wasEmpty {
                 let fmtFlags = asbd.mFormatFlags
                 let bitsPerCh = asbd.mBitsPerChannel
-                let isFloat = (fmtFlags & kAudioFormatFlagIsFloat) != 0
                 let isPacked = (fmtFlags & kAudioFormatFlagIsPacked) != 0
-                let isInterleaved = (fmtFlags & kAudioFormatFlagIsNonInterleaved) == 0
+                let isInterleaved = !isNonInterleaved
                 DiagLog.shared.write("CAPTURE: First buffer — rate=\(asbd.mSampleRate) ch=\(asbd.mChannelsPerFrame) bits=\(bitsPerCh) float=\(isFloat) packed=\(isPacked) interleaved=\(isInterleaved) flags=0x\(String(fmtFlags, radix: 16)) frames=\(pcmBuffer.frameLength) dataBytes=\(length)")
             }
         }
